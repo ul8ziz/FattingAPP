@@ -1,0 +1,32 @@
+# Build outputs
+**/bin/
+**/obj/
+TestResults/
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+# Rider/VSCode/Cursor
+.idea/
+.vscode/
+
+# OS/filesystem
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Logs
+*.log
+
+# NuGet
+**/packages/
+*.nupkg
+*.snupkg
+
+# Coverage
+coverage/
+**/coverage.*
+
