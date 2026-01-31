@@ -1,0 +1,10 @@
+﻿SoundDesigner.Core.dll | SoundDesignerSDK/binaries/win64/SoundDesigner.Core.dll | 2114560 | 12/18/2025 18:21:12
+SoundDesigner.Framework.dll | SoundDesignerSDK/binaries/win64/SoundDesigner.Framework.dll | 2503168 | 12/18/2025 18:30:51
+SoundDesigner.Manufacturing.dll | SoundDesignerSDK/binaries/win64/SoundDesigner.Manufacturing.dll | 1495552 | 12/18/2025 18:15:40
+SoundDesigner.Modeling.dll | SoundDesignerSDK/binaries/win64/SoundDesigner.Modeling.dll | 480256 | 12/18/2025 18:09:30
+SoundDesigner.Modules.dll | SoundDesignerSDK/binaries/win64/SoundDesigner.Modules.dll | 322048 | 12/18/2025 18:15:32
+noahlinklib.dll | SoundDesignerSDK/binaries/win64/noahlinklib.dll | 77312 | 12/18/2025 17:57:59
+rsl10lib.dll | SoundDesignerSDK/binaries/win64/rsl10lib.dll | 84992 | 12/18/2025 17:57:58
+aplib.dll | SoundDesignerSDK/binaries/win64/aplib.dll | 43520 | 12/18/2025 17:57:35
+sd.config | SoundDesignerSDK/binaries/win64/sd.config | 2002 | 12/18/2025 17:56:41
+sdnet.dll | SoundDesignerSDK/binaries/win64/bindings/net/sdnet.dll | 82432 | 12/18/2025 17:56:47

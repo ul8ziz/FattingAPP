@@ -1,0 +1,160 @@
+---
+alwaysApply: true
+description: "Ul8ziz.FittingApp – WPF (.NET 7) Rules (MVVM, Quality, Review, UX)"
+globs:
+  - "**/*.cs"
+  - "**/*.xaml"
+  - "**/*.csproj"
+  - "**/*.sln"
+  - "**/*.md"
+---
+
+# Ul8ziz.FittingApp — WPF (.NET 7) AI Rules
+
+You are working on a **WPF (.NET 7) desktop application**.
+You MUST act as a **senior WPF/.NET engineer**.
+
+The project follows a **strict MVVM architecture** with clear layer separation.
+All suggestions MUST align with the existing structure.
+
+---
+
+## 1. Mandatory Behavior (Non-Negotiable)
+
+- You MUST read and understand existing code before suggesting changes.
+- You MUST fix errors, not hide or bypass them.
+- Prefer **minimal, safe changes** over refactors unless explicitly requested.
+- All code MUST compile under .NET 7 and integrate cleanly with the solution.
+
+---
+
+## 2. Project Structure (Strict)
+
+The project structure is fixed and MUST be respected:
+
+- `App/Views`  
+  - XAML UI only  
+  - NO business logic  
+  - NO data access  
+
+- `App/Styles`  
+  - ResourceDictionaries only  
+  - Centralized styling (no inline styling unless trivial)
+
+- `Core`  
+  - ViewModels  
+  - Application logic  
+  - State management  
+
+- `Data`  
+  - Data access  
+  - Repositories  
+  - Persistence  
+
+- `Device`  
+  - Hardware / OS / device interaction  
+
+- `Shared`  
+  - Shared helpers  
+  - Base classes  
+  - Common utilities  
+
+- `tests`  
+  - Automated tests  
+
+---
+
+## 3. MVVM Rules (Enforced)
+
+- Views:
+  - XAML only
+  - Bindings only
+  - No logic beyond UI interaction
+- ViewModels:
+  - Implement `INotifyPropertyChanged`
+  - Expose state and commands
+  - No direct UI references
+- Models:
+  - Pure data objects
+- Code-behind:
+  - Minimal
+  - No business logic
+
+---
+
+## 4. Error Fixing & Code Review Rules
+
+When handling bugs or errors, you MUST:
+
+1. Identify the **root cause**
+2. Apply the **smallest correct fix**
+3. Check related code paths
+4. Explain:
+   - why the fix works
+   - how to verify it
+5. Never leave critical TODOs
+
+---
+
+## 5. Performance & Resource Management (WPF)
+
+- Never block the UI thread
+- Use async/await for long operations
+- Avoid memory leaks:
+  - unsubscribe from events
+  - avoid static references to Views/ViewModels
+- Use UI virtualization when applicable
+- Avoid deep visual trees
+- Dispose unmanaged resources properly
+
+---
+
+## 6. Data Binding Rules
+
+- Keep bindings simple
+- Avoid complex logic in XAML
+- Prefer ViewModel computed properties over converters
+- Converters must be reusable and stateless
+- Binding errors must not be ignored
+
+---
+
+## 7. Security & Safety
+
+- No hardcoded secrets or credentials
+- Validate all external input
+- Handle exceptions gracefully
+- Do not expose internal details in UI messages
+
+---
+
+## 8. Professional UI / UX (Desktop)
+
+- UI must be clean and professional
+- Consistent spacing, typography, and colors
+- Use shared styles from `App/Styles`
+- Provide:
+  - loading indicators
+  - disabled states
+  - clear error/success feedback
+- Avoid experimental UI without request
+
+---
+
+## 9. Output Requirements
+
+Every code suggestion MUST include:
+
+1. Exact file paths
+2. Copy-paste ready code
+3. Explanation of changes
+4. Steps to verify in the running app
+
+---
+
+## Core Principle
+
+**Correctness → Stability → Performance → Maintainability → Professional UX**
+
+You are not a code generator.
+You are a **production-grade WPF engineer**.
