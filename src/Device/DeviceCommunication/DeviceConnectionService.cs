@@ -84,37 +84,98 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
 
                 progress?.Report(20);
 
-                // Detect device
-                var detectMonitor = commAdaptor.BeginDetectDevice();
-                var lastProgress = -1;
-
-                while (!detectMonitor.IsFinished)
+                // Detect device - following SDK example pattern
+                SDLib.IDeviceInfo? deviceInfo = null;
+                try
                 {
-                    if (cancellationToken.IsCancellationRequested)
+                    var detectMonitor = commAdaptor.BeginDetectDevice();
+                    if (detectMonitor != null)
                     {
+                        var lastProgress = -1;
+                        
+                        while (!detectMonitor.IsFinished)
+                        {
+                            if (cancellationToken.IsCancellationRequested)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"Device connection cancelled for {side} side");
+                                try
+                                {
+                                    detectMonitor.GetResult(); // Check for errors
+                                    commAdaptor.EndDetectDevice(detectMonitor);
+                                }
+                                catch
+                                {
+                                    // Ignore cleanup errors
+                                }
+                                throw new OperationCanceledException();
+                            }
+
+                            await Task.Delay(300, cancellationToken);
+                            
+                            // Update progress if available
+                            var maxSteps = detectMonitor.ProgressMaximum;
+                            var currentProgress = detectMonitor.GetProgressValue();
+                            if (maxSteps > 0 && lastProgress != currentProgress)
+                            {
+                                lastProgress = currentProgress;
+                                var progressPercent = 20 + (int)(((double)currentProgress / maxSteps) * 40);
+                                progress?.Report(progressPercent);
+                            }
+                        }
+                        
+                        // Get result and check for errors
                         detectMonitor.GetResult();
-                        throw new OperationCanceledException();
+                        
+                        // Get device information
+                        deviceInfo = commAdaptor.EndDetectDevice(detectMonitor);
+                        progress?.Report(60);
+                        
+                        if (deviceInfo == null)
+                        {
+                            throw new InvalidOperationException("Device detection failed");
+                        }
+                        
+                        System.Diagnostics.Debug.WriteLine($"Device detected on {side} side: ProductId={deviceInfo.ProductId}, SerialId={deviceInfo.SerialId}");
                     }
-
-                    await Task.Delay(300, cancellationToken);
-
-                    var maxSteps = detectMonitor.ProgressMaximum;
-                    var currentProgress = detectMonitor.GetProgressValue();
-
-                    if (maxSteps > 0 && lastProgress != currentProgress)
+                    else
                     {
-                        lastProgress = currentProgress;
-                        var progressPercent = 20 + (int)(((double)currentProgress / maxSteps) * 40);
-                        progress?.Report(progressPercent);
+                        throw new InvalidOperationException("Failed to begin device detection");
                     }
                 }
-
-                detectMonitor.GetResult();
-                var deviceInfo = commAdaptor.EndDetectDevice(detectMonitor);
-
-                if (deviceInfo == null)
+                catch (OperationCanceledException)
                 {
-                    throw new InvalidOperationException("Device detection failed");
+                    // Cleanup connection on cancellation
+                    if (side == DeviceSide.Left)
+                        _leftConnection = null;
+                    else
+                        _rightConnection = null;
+                    try
+                    {
+                        commAdaptor.CloseDevice();
+                    }
+                    catch
+                    {
+                        // Ignore cleanup errors
+                    }
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error detecting device on {side} side: {ex.Message}");
+                    // Cleanup connection on error
+                    if (side == DeviceSide.Left)
+                        _leftConnection = null;
+                    else
+                        _rightConnection = null;
+                    try
+                    {
+                        commAdaptor.CloseDevice();
+                    }
+                    catch
+                    {
+                        // Ignore cleanup errors
+                    }
+                    throw;
                 }
 
                 progress?.Report(60);
@@ -138,39 +199,59 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
 
                 progress?.Report(70);
 
-                // Initialize product if available
+                // Initialize product if available - following SDK example pattern
                 if (_product != null)
                 {
                     var initMonitor = _product.BeginInitializeDevice(commAdaptor);
-                    lastProgress = -1;
-
-                    while (!initMonitor.IsFinished)
+                    if (initMonitor != null)
                     {
-                        if (cancellationToken.IsCancellationRequested)
+                        var lastProgress = -1;
+                        
+                        while (!initMonitor.IsFinished)
                         {
-                            initMonitor.GetResult();
-                            throw new OperationCanceledException();
+                            if (cancellationToken.IsCancellationRequested)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"Product initialization cancelled for {side} side");
+                                try
+                                {
+                                    initMonitor.GetResult(); // Check for errors
+                                    _product.EndInitializeDevice(initMonitor);
+                                }
+                                catch
+                                {
+                                    // Ignore cleanup errors
+                                }
+                                throw new OperationCanceledException();
+                            }
+
+                            await Task.Delay(100, cancellationToken);
+                            
+                            // Update progress if available
+                            var maxSteps = initMonitor.ProgressMaximum;
+                            var currentProgress = initMonitor.GetProgressValue();
+                            if (maxSteps > 0 && lastProgress != currentProgress)
+                            {
+                                lastProgress = currentProgress;
+                                var progressPercent = 70 + (int)(((double)currentProgress / maxSteps) * 25);
+                                progress?.Report(progressPercent);
+                            }
                         }
-
-                        await Task.Delay(100, cancellationToken);
-
-                        var maxSteps = initMonitor.ProgressMaximum;
-                        var currentProgress = initMonitor.GetProgressValue();
-
-                        if (maxSteps > 0 && lastProgress != currentProgress)
+                        
+                        // Get result and check for errors
+                        initMonitor.GetResult();
+                        
+                        // End initialization
+                        var isConfigured = _product.EndInitializeDevice(initMonitor);
+                        progress?.Report(100);
+                        
+                        if (isConfigured)
                         {
-                            lastProgress = currentProgress;
-                            var progressPercent = 70 + (int)(((double)currentProgress / maxSteps) * 25);
-                            progress?.Report(progressPercent);
+                            System.Diagnostics.Debug.WriteLine($"Device on {side} side initialized successfully");
                         }
-                    }
-
-                    initMonitor.GetResult();
-                    var isConfigured = _product.EndInitializeDevice(initMonitor);
-
-                    if (!isConfigured)
-                    {
-                        // Device not configured, but connection is still valid
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Device on {side} side not fully configured, but connection is valid");
+                        }
                     }
                 }
 

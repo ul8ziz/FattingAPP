@@ -36,39 +36,51 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             var foundProgrammers = new List<ProgrammerInfo>();
             var productManager = _sdkManager.ProductManager;
 
-            // Get available COM ports
-            var comPorts = SerialPort.GetPortNames();
-            progress?.Report(10);
-
-            int totalChecks = _wiredProgrammers.Count * comPorts.Length;
-            int currentCheck = 0;
-
-            foreach (var programmerName in _wiredProgrammers)
+            try
             {
-                if (cancellationToken.IsCancellationRequested)
-                    break;
+                // Get available COM ports
+                var comPorts = SerialPort.GetPortNames();
+                progress?.Report(10);
 
-                foreach (var portName in comPorts)
+                if (comPorts.Length == 0)
+                {
+                    System.Diagnostics.Debug.WriteLine("No COM ports available for wired programmer scan");
+                    progress?.Report(100);
+                    return foundProgrammers;
+                }
+
+                int totalChecks = _wiredProgrammers.Count * comPorts.Length;
+                int currentCheck = 0;
+
+                foreach (var programmerName in _wiredProgrammers)
                 {
                     if (cancellationToken.IsCancellationRequested)
-                        break;
-
-                    try
                     {
-                        // Try to create communication interface
-                        var commAdaptor = productManager.CreateCommunicationInterface(
-                            programmerName, 
-                            CommunicationPort.kLeft, 
-                            $"port={portName}");
+                        System.Diagnostics.Debug.WriteLine("Wired programmer scan cancelled");
+                        break;
+                    }
 
-                        if (commAdaptor != null)
+                    foreach (var portName in comPorts)
+                    {
+                        if (cancellationToken.IsCancellationRequested)
+                            break;
+
+                        ICommunicationAdaptor? commAdaptor = null;
+                        try
                         {
-                            // Test if programmer is actually available
-                            try
+                            // Try to create communication interface
+                            commAdaptor = productManager.CreateCommunicationInterface(
+                                programmerName, 
+                                CommunicationPort.kLeft, 
+                                $"port={portName}");
+
+                            if (commAdaptor != null)
                             {
+                                // Test if programmer is actually available
                                 var isAvailable = commAdaptor.CheckDevice();
                                 if (isAvailable)
                                 {
+                                    System.Diagnostics.Debug.WriteLine($"Found wired programmer: {programmerName} on port {portName}");
                                     foundProgrammers.Add(new ProgrammerInfo
                                     {
                                         Id = foundProgrammers.Count + 1,
@@ -80,28 +92,47 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                                     });
                                 }
                             }
-                            catch
-                            {
-                                // Programmer not available on this port
-                            }
-                            finally
+                        }
+                        catch (Exception ex)
+                        {
+                            // Programmer not available on this port or error occurred
+                            System.Diagnostics.Debug.WriteLine($"Failed to check {programmerName} on {portName}: {ex.Message}");
+                        }
+                        finally
+                        {
+                            // Always close the device
+                            try
                             {
                                 commAdaptor?.CloseDevice();
                             }
+                            catch
+                            {
+                                // Ignore close errors
+                            }
                         }
-                    }
-                    catch
-                    {
-                        // Failed to create interface, skip this port
-                    }
 
-                    currentCheck++;
-                    var progressPercent = 10 + (int)((currentCheck / (double)totalChecks) * 80);
-                    progress?.Report(progressPercent);
+                        currentCheck++;
+                        var progressPercent = 10 + (int)((currentCheck / (double)totalChecks) * 80);
+                        progress?.Report(progressPercent);
+                        
+                        // Yield to allow cancellation and UI updates
+                        await Task.Delay(50, cancellationToken);
+                    }
                 }
+
+                progress?.Report(100);
+            }
+            catch (OperationCanceledException)
+            {
+                System.Diagnostics.Debug.WriteLine("Wired programmer scan was cancelled");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error in ScanForWiredProgrammersAsync: {ex.Message}");
+                throw new InvalidOperationException($"Failed to scan for wired programmers: {ex.Message}", ex);
             }
 
-            progress?.Report(100);
             return foundProgrammers;
         }
 
@@ -167,8 +198,17 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 {
                     if (cancellationToken.IsCancellationRequested)
                     {
-                        productManager.EndScanForWirelessDevices(monitor);
-                        break;
+                        System.Diagnostics.Debug.WriteLine("Wireless programmer scan cancelled");
+                        try
+                        {
+                            monitor.GetResult();
+                            productManager.EndScanForWirelessDevices(monitor);
+                        }
+                        catch
+                        {
+                            // Ignore cleanup errors
+                        }
+                        throw new OperationCanceledException();
                     }
 
                     await Task.Delay(200, cancellationToken);
@@ -181,6 +221,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                         {
                             if (!scannedDevices.Any(d => d.Id == device.Id))
                             {
+                                System.Diagnostics.Debug.WriteLine($"Found wireless device: {device.Name} (ID: {device.Id})");
                                 scannedDevices.Add(device);
                             }
                         }
@@ -196,8 +237,17 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     progress?.Report(Math.Min(progressPercent, 90));
                 }
 
-                monitor.GetResult();
-                productManager.EndScanForWirelessDevices(monitor);
+                // Get result before ending scan
+                try
+                {
+                    monitor.GetResult();
+                    productManager.EndScanForWirelessDevices(monitor);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error ending wireless scan: {ex.Message}");
+                    // Continue anyway
+                }
 
                 // Add found programmers
                 int id = 1;
