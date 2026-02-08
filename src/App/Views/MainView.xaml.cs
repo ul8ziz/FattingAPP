@@ -254,7 +254,7 @@ namespace Ul8ziz.FittingApp.App.Views
             _canExecute = canExecute;
         }
 
-        public event EventHandler CanExecuteChanged
+        public event EventHandler? CanExecuteChanged
         {
             add 
             { 

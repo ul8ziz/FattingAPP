@@ -16,7 +16,7 @@
     </UserControl.Resources>
     
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Margin="32,24">
+        <StackPanel Margin="24,16,24,24">
             
             <!-- Header -->
             <StackPanel Margin="0,0,0,24">
@@ -28,8 +28,21 @@
             </StackPanel>
             
             <!-- Status Banner: No Programmer Selected / Programmer Selected / Connected -->
-            <Border Style="{StaticResource StatusBannerInfoStyle}"
-                    Margin="0,0,0,24">
+            <Border Margin="0,0,0,24">
+                <Border.Style>
+                    <Style TargetType="Border" BasedOn="{StaticResource StatusBannerInfoStyle}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ScanFoundNothing}" Value="True">
+                                <Setter Property="Background" Value="#FEE2E2"/>
+                                <Setter Property="BorderBrush" Value="#FECACA"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding HasFoundProgrammers}" Value="True">
+                                <Setter Property="Background" Value="#D1FAE5"/>
+                                <Setter Property="BorderBrush" Value="#A7F3D0"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -47,11 +60,14 @@
                         <Border.Style>
                             <Style TargetType="Border">
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasFoundProgrammers}" Value="True">
-                                        <Setter Property="Background" Value="{StaticResource SuccessBrush}"/>
-                                    </DataTrigger>
                                     <DataTrigger Binding="{Binding IsSearching}" Value="True">
                                         <Setter Property="Background" Value="#F59E0B"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding ScanFoundNothing}" Value="True">
+                                        <Setter Property="Background" Value="#EF4444"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding HasFoundProgrammers}" Value="True">
+                                        <Setter Property="Background" Value="{StaticResource SuccessBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -66,6 +82,9 @@
                                 <Style TargetType="TextBlock">
                                     <Setter Property="Text" Value="!"/>
                                     <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ScanFoundNothing}" Value="True">
+                                            <Setter Property="Text" Value="✕"/>
+                                        </DataTrigger>
                                         <DataTrigger Binding="{Binding HasFoundProgrammers}" Value="True">
                                             <Setter Property="Text" Value="✓"/>
                                         </DataTrigger>
@@ -89,8 +108,12 @@
                                             <Setter Property="Text" Value="Searching for Programmers..."/>
                                             <Setter Property="Foreground" Value="#92400E"/>
                                         </DataTrigger>
+                                        <DataTrigger Binding="{Binding ScanFoundNothing}" Value="True">
+                                            <Setter Property="Text" Value="No Programmers Found"/>
+                                            <Setter Property="Foreground" Value="#DC2626"/>
+                                        </DataTrigger>
                                         <DataTrigger Binding="{Binding HasFoundProgrammers}" Value="True">
-                                            <Setter Property="Text" Value="Programmer Selected"/>
+                                            <Setter Property="Text" Value="Programmer Found"/>
                                             <Setter Property="Foreground" Value="#065F46"/>
                                         </DataTrigger>
                                     </Style.Triggers>
@@ -108,8 +131,12 @@
                                             <Setter Property="Text" Value="Please wait while we search for connected programmers"/>
                                             <Setter Property="Foreground" Value="#92400E"/>
                                         </DataTrigger>
+                                        <DataTrigger Binding="{Binding ScanFoundNothing}" Value="True">
+                                            <Setter Property="Text" Value="{Binding FoundProgrammersMessage}"/>
+                                            <Setter Property="Foreground" Value="#DC2626"/>
+                                        </DataTrigger>
                                         <DataTrigger Binding="{Binding HasFoundProgrammers}" Value="True">
-                                            <Setter Property="Text" Value="{Binding SelectedProgrammerName, StringFormat='{}{0} - Select hearing aids to connect'}"/>
+                                            <Setter Property="Text" Value="{Binding FoundProgrammersMessage}"/>
                                             <Setter Property="Foreground" Value="#065F46"/>
                                         </DataTrigger>
                                     </Style.Triggers>

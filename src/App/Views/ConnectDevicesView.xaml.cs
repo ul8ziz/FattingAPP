@@ -23,6 +23,7 @@ namespace Ul8ziz.FittingApp.App.Views
     {
         private bool _isSearching;
         private bool _hasFoundProgrammers;
+        private bool _scanCompleted; // true after scan finishes (even with 0 results)
         private string _foundProgrammersMessage = string.Empty;
         private bool _isDiscovering;
         private double _discoveryProgress;
@@ -49,36 +50,55 @@ namespace Ul8ziz.FittingApp.App.Views
             InitializeComponent();
             DataContext = this;
             
-            // Initialize SDK services (lazy initialization)
-            InitializeSdkServices();
+            // SDK init is deferred to first scan to avoid constructor crash
         }
 
+        /// <summary>
+        /// Lazily initializes SDK services. Called before first scan.
+        /// Never throws - sets _sdkManager to null on failure.
+        /// </summary>
+        private string? _lastSdkError;
+        
         private void InitializeSdkServices()
         {
+            if (_sdkManager?.IsInitialized == true)
+                return; // Already initialized
+
+            _lastSdkError = null;
+
             try
             {
-                System.Diagnostics.Debug.WriteLine("Initializing SDK services...");
+                System.Diagnostics.Debug.WriteLine("=== Initializing SDK services ===");
+                System.Diagnostics.Debug.WriteLine($"App Base Dir: {AppDomain.CurrentDomain.BaseDirectory}");
+                System.Diagnostics.Debug.WriteLine($"Library Path: {SdkConfiguration.GetLibraryPath()}");
+                System.Diagnostics.Debug.WriteLine($"Config Path: {SdkConfiguration.GetConfigPath()}");
+                System.Diagnostics.Debug.WriteLine($"App Base Dir: {AppDomain.CurrentDomain.BaseDirectory}");
                 
                 _sdkManager = new SdkManager();
                 _sdkManager.Initialize();
-                
-                if (!_sdkManager.IsInitialized)
-                {
-                    throw new InvalidOperationException("SDK initialization returned false");
-                }
                 
                 _programmerScanner = new ProgrammerScanner(_sdkManager);
                 _deviceDiscoveryService = new DeviceDiscoveryService(_sdkManager);
                 _deviceConnectionService = new DeviceConnectionService(_sdkManager);
                 
-                System.Diagnostics.Debug.WriteLine("SDK services initialized successfully");
+                System.Diagnostics.Debug.WriteLine("=== SDK services initialized successfully ===");
             }
             catch (Exception ex)
             {
-                // SDK initialization failed - will show error when user tries to scan
-                System.Diagnostics.Debug.WriteLine($"SDK initialization failed: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-                throw; // Re-throw to be caught by caller
+                // Build detailed error message including inner exceptions
+                var errorDetail = ex.Message;
+                if (ex.InnerException != null)
+                    errorDetail += $"\nCause: {ex.InnerException.Message}";
+                
+                System.Diagnostics.Debug.WriteLine($"=== SDK initialization FAILED ===");
+                System.Diagnostics.Debug.WriteLine($"Error: {errorDetail}");
+                System.Diagnostics.Debug.WriteLine($"Stack: {ex.StackTrace}");
+                
+                _lastSdkError = errorDetail;
+                _sdkManager = null;
+                _programmerScanner = null;
+                _deviceDiscoveryService = null;
+                _deviceConnectionService = null;
             }
         }
 
@@ -100,6 +120,15 @@ namespace Ul8ziz.FittingApp.App.Views
             get => _foundProgrammersMessage;
             set { _foundProgrammersMessage = value; OnPropertyChanged(); }
         }
+
+        public bool ScanCompleted
+        {
+            get => _scanCompleted;
+            set { _scanCompleted = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>True when scan finished but found nothing</summary>
+        public bool ScanFoundNothing => ScanCompleted && !HasFoundProgrammers && !IsSearching;
 
         public string TimeoutMessage
         {
@@ -213,76 +242,43 @@ namespace Ul8ziz.FittingApp.App.Views
         // Event Handlers
         private async void SearchProgrammers_Click(object sender, RoutedEventArgs e)
         {
-            // Debug: Confirm event is being called
             System.Diagnostics.Debug.WriteLine("=== SearchProgrammers_Click STARTED ===");
             
-            // Force UI update immediately - use BeginInvoke for immediate update
-            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-            {
-                IsSearching = true;
-                HasFoundProgrammers = false;
-                FoundProgrammersMessage = "Searching for programmers...";
-                _timeoutSecondsRemaining = ScanTimeoutSeconds;
-                StartTimeoutTimer();
-                OnPropertyChanged(nameof(IsSearching));
-                OnPropertyChanged(nameof(HasFoundProgrammers));
-                OnPropertyChanged(nameof(FoundProgrammersMessage));
-                OnPropertyChanged(nameof(TimeoutMessage));
-                OnPropertyChanged(nameof(CanCancelSearch));
-            }), System.Windows.Threading.DispatcherPriority.Normal);
+            // Cancel any previous scan
+            _cancellationTokenSource?.Cancel();
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = new CancellationTokenSource();
+
+            // Update UI immediately (we're already on the UI thread)
+            IsSearching = true;
+            HasFoundProgrammers = false;
+            ScanCompleted = false;
+            FoundProgrammersMessage = "Searching for programmers...";
+            Programmers.Clear();
+            _timeoutSecondsRemaining = ScanTimeoutSeconds;
+            StartTimeoutTimer();
 
             try
             {
-                System.Diagnostics.Debug.WriteLine("Starting search process...");
-
-                // Cancel any previous scan
-                if (_cancellationTokenSource != null)
-                {
-                    _cancellationTokenSource.Cancel();
-                    _cancellationTokenSource.Dispose();
-                }
-                _cancellationTokenSource = new CancellationTokenSource();
-                
-                // Check if cancellation was requested before starting
-                if (_cancellationTokenSource.Token.IsCancellationRequested)
-                {
-                    System.Diagnostics.Debug.WriteLine("Cancellation requested before scan started");
-                    return;
-                }
-
-                // Ensure SDK is initialized
+                // Ensure SDK is initialized (lazy)
                 if (_sdkManager == null || !_sdkManager.IsInitialized)
                 {
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-                        FoundProgrammersMessage = "Initializing SDK...";
-                    });
-                    
+                    FoundProgrammersMessage = "Initializing SDK...";
                     System.Diagnostics.Debug.WriteLine("Initializing SDK...");
                     InitializeSdkServices();
                     
                     if (_sdkManager == null || !_sdkManager.IsInitialized)
                     {
-                        var errorMsg = "SDK initialization failed. Please check SDK configuration and ensure library files are available.";
-                        System.Diagnostics.Debug.WriteLine($"ERROR: {errorMsg}");
-                        throw new InvalidOperationException(errorMsg);
+                        var detail = _lastSdkError ?? "Unknown error";
+                        throw new InvalidOperationException($"SDK initialization failed.\n\n{detail}");
                     }
-                    
                     System.Diagnostics.Debug.WriteLine("SDK initialized successfully");
                 }
 
                 if (_programmerScanner == null)
-                {
-                    var errorMsg = "Programmer scanner not available.";
-                    System.Diagnostics.Debug.WriteLine($"ERROR: {errorMsg}");
-                    throw new InvalidOperationException(errorMsg);
-                }
+                    throw new InvalidOperationException("Programmer scanner not available.");
 
-                Application.Current.Dispatcher.Invoke(() =>
-                {
-                    Programmers.Clear();
-                    FoundProgrammersMessage = "Scanning for wired and wireless programmers...";
-                });
+                FoundProgrammersMessage = "Scanning for programmers...";
 
                 System.Diagnostics.Debug.WriteLine("Starting scan for programmers...");
 
@@ -292,85 +288,112 @@ namespace Ul8ziz.FittingApp.App.Views
                     {
                         FoundProgrammersMessage = $"Scanning... {p}%";
                     });
-                    System.Diagnostics.Debug.WriteLine($"Scan progress: {p}%");
                 });
 
-                // Scan for all programmers
-                var foundProgrammers = await _programmerScanner.ScanAllProgrammersAsync(
+                // Scan for all programmers (returns detailed result)
+                var scanResult = await _programmerScanner.ScanAllProgrammersAsync(
                     progress,
                     _cancellationTokenSource.Token);
-                
+
+                // After await, we're back on the UI thread
+                StopTimeoutTimer();
+
+                var foundProgrammers = scanResult.FoundProgrammers;
                 System.Diagnostics.Debug.WriteLine($"Scan completed. Found {foundProgrammers.Count} programmers");
-
-                // Convert to ViewModels on UI thread
-                Application.Current.Dispatcher.Invoke(() =>
+                    
+                foreach (var programmerInfo in foundProgrammers)
                 {
-                    StopTimeoutTimer();
-                    
-                    foreach (var programmerInfo in foundProgrammers)
+                    var programmerVm = new ProgrammerViewModel
                     {
-                        var programmerVm = new ProgrammerViewModel
+                        Id = programmerInfo.Id,
+                        Name = programmerInfo.Name,
+                        SerialNumber = programmerInfo.SerialNumber ?? "N/A",
+                        Firmware = programmerInfo.Firmware ?? "N/A",
+                        Port = programmerInfo.Port ?? programmerInfo.DeviceId ?? "N/A",
+                        IsSelected = false
+                    };
+
+                    programmerVm.ProgrammerInfo = programmerInfo;
+
+                    programmerVm.PropertyChanged += (s, args) =>
+                    {
+                        if (args.PropertyName == nameof(ProgrammerViewModel.IsSelected))
                         {
-                            Id = programmerInfo.Id,
-                            Name = programmerInfo.Name,
-                            SerialNumber = programmerInfo.SerialNumber ?? "N/A",
-                            Firmware = programmerInfo.Firmware ?? "N/A",
-                            Port = programmerInfo.Port ?? programmerInfo.DeviceId ?? "N/A",
-                            IsSelected = false
-                        };
+                            if (programmerVm.IsSelected)
+                                _selectedProgrammerInfo = programmerInfo;
+                            OnPropertyChanged(nameof(CanDiscover));
+                            OnPropertyChanged(nameof(HasSelectedProgrammer));
+                            OnPropertyChanged(nameof(SelectedProgrammerName));
+                        }
+                    };
 
-                        // Store ProgrammerInfo reference for later use
-                        programmerVm.ProgrammerInfo = programmerInfo;
+                    Programmers.Add(programmerVm);
+                }
 
-                        programmerVm.PropertyChanged += (s, args) =>
-                        {
-                            if (args.PropertyName == nameof(ProgrammerViewModel.IsSelected))
-                            {
-                                if (programmerVm.IsSelected)
-                                {
-                                    _selectedProgrammerInfo = programmerInfo;
-                                }
-                                OnPropertyChanged(nameof(CanDiscover));
-                                OnPropertyChanged(nameof(HasSelectedProgrammer));
-                                OnPropertyChanged(nameof(SelectedProgrammerName));
-                            }
-                        };
+                // Notify UI that the collection changed
+                OnPropertyChanged(nameof(HasProgrammers));
+                OnPropertyChanged(nameof(Programmers));
 
-                        Programmers.Add(programmerVm);
-                    }
+                IsSearching = false;
+                ScanCompleted = true;
+                HasFoundProgrammers = foundProgrammers.Count > 0;
+                OnPropertyChanged(nameof(ScanFoundNothing));
+                
+                if (foundProgrammers.Count > 0)
+                {
+                    FoundProgrammersMessage = $"Found {foundProgrammers.Count} programmer(s)";
+                }
+                else
+                {
+                    FoundProgrammersMessage = "No programmers found. Connect a programmer and try again.";
 
-                    IsSearching = false;
-                    HasFoundProgrammers = foundProgrammers.Count > 0;
-                    FoundProgrammersMessage = foundProgrammers.Count > 0 
-                        ? $"Found {foundProgrammers.Count} programmer(s)" 
-                        : "No programmers found. Please check connections and try again.";
-                    
-                    OnPropertyChanged(nameof(IsSearching));
-                    OnPropertyChanged(nameof(HasProgrammers));
-                    OnPropertyChanged(nameof(CanDiscover));
-                    OnPropertyChanged(nameof(HasFoundProgrammers));
-                    OnPropertyChanged(nameof(FoundProgrammersMessage));
-                    OnPropertyChanged(nameof(TimeoutMessage));
-                    OnPropertyChanged(nameof(CanCancelSearch));
-                });
+                    // Build detailed diagnostic message with full error details
+                    var diagnostics = scanResult.GetDiagnosticSummary();
+                    var fullDetail = scanResult.GetFullDiagnosticDetail();
+                    var hasHiproUnknownName = scanResult.AllAttempts.Any(a =>
+                        string.Equals(a.ErrorCode, "E_UNKNOWN_NAME", StringComparison.OrdinalIgnoreCase) &&
+                        (a.ProgrammerName?.Contains("HI-PRO", StringComparison.OrdinalIgnoreCase) ?? false));
+                    var hasHiproNotConnected = scanResult.AllAttempts.Any(a =>
+                        string.Equals(a.ErrorCode, "NOT_CONNECTED", StringComparison.OrdinalIgnoreCase) &&
+                        (a.ProgrammerName?.Contains("HI-PRO", StringComparison.OrdinalIgnoreCase) ?? false));
+
+                    // Check if CTK is installed (required for wired programmers)
+                    var ctkInstalled = SdkConfiguration.IsCtkInstalled();
+
+                    var pleaseCheck = "Please check:\n" +
+                        "• Programmer (HI-PRO / CAA) is connected via USB\n" +
+                        "• The programmer is powered on\n" +
+                        "• Correct drivers are installed";
+                    if (!ctkInstalled)
+                        pleaseCheck += "\n• CTK Runtime: Install CTKRuntime64.msi from SDK redistribution folder (required for wired programmers: CAA, HI-PRO, Promira)";
+                    if (hasHiproUnknownName)
+                        pleaseCheck += "\n• HI-PRO: Ensure HI-PRO driver (v4.02+) is installed and that \"C:\\Program Files (x86)\\HI-PRO\" is in the system PATH (not just user PATH); restart the app after changing PATH.";
+                    if (hasHiproNotConnected && fullDetail.Contains("E_INVALID_STATE", StringComparison.OrdinalIgnoreCase))
+                        pleaseCheck += "\n• HI-PRO (E_INVALID_STATE): Close any other app using HI-PRO (e.g. Starkey Inspire, HI-PRO Configuration). Ensure HI-PRO is on COM1–COM4 (Device Manager → Ports → HI-PRO → Advanced). Restart this app and try again.";
+
+                    System.Diagnostics.Debug.WriteLine("=== FULL SCAN DIAGNOSTIC ===");
+                    System.Diagnostics.Debug.WriteLine(fullDetail);
+                    System.Diagnostics.Debug.WriteLine("=== END DIAGNOSTIC ===");
+
+                    MessageBox.Show(
+                        $"No programmers were detected.\n\nScan Results:\n{diagnostics}\n\n" +
+                        $"Technical Details:\n{fullDetail}\n\n" + pleaseCheck,
+                        "No Programmers Found",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
                 
                 System.Diagnostics.Debug.WriteLine("=== SearchProgrammers_Click completed successfully ===");
             }
             catch (OperationCanceledException)
             {
                 System.Diagnostics.Debug.WriteLine("Scan was cancelled");
-                Application.Current.Dispatcher.Invoke(() =>
-                {
-                    StopTimeoutTimer();
-                    IsSearching = false;
-                    HasFoundProgrammers = false;
-                    FoundProgrammersMessage = "Scan cancelled by user";
-                    OnPropertyChanged(nameof(IsSearching));
-                    OnPropertyChanged(nameof(HasFoundProgrammers));
-                    OnPropertyChanged(nameof(FoundProgrammersMessage));
-                    OnPropertyChanged(nameof(TimeoutMessage));
-                    OnPropertyChanged(nameof(CanCancelSearch));
-                });
+                StopTimeoutTimer();
+                IsSearching = false;
+                ScanCompleted = true;
+                HasFoundProgrammers = false;
+                OnPropertyChanged(nameof(ScanFoundNothing));
+                FoundProgrammersMessage = "Scan cancelled by user";
             }
             catch (Exception ex)
             {
@@ -383,45 +406,50 @@ namespace Ul8ziz.FittingApp.App.Views
                     System.Diagnostics.Debug.WriteLine($"Inner exception: {ex.InnerException.Message}");
                 }
                 
-                Application.Current.Dispatcher.Invoke(() =>
-                {
-                    StopTimeoutTimer();
-                    IsSearching = false;
-                    HasFoundProgrammers = false;
-                    FoundProgrammersMessage = $"Error: {ex.Message}";
-                    OnPropertyChanged(nameof(IsSearching));
-                    OnPropertyChanged(nameof(HasFoundProgrammers));
-                    OnPropertyChanged(nameof(FoundProgrammersMessage));
-                    OnPropertyChanged(nameof(TimeoutMessage));
-                    OnPropertyChanged(nameof(CanCancelSearch));
-                    
-                    // Show error message to user
-                    MessageBox.Show(
-                        $"Failed to scan for programmers:\n\n{ex.Message}\n\nPlease check:\n- SDK files are available at: {SdkConfiguration.SdkPath}\n- Library file exists: {SdkConfiguration.GetLibraryPath()}\n- Config file exists: {SdkConfiguration.GetConfigPath()}\n- Programmers are connected\n- Drivers are installed",
-                        "Scan Error",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error);
-                });
+                StopTimeoutTimer();
+                IsSearching = false;
+                ScanCompleted = true;
+                HasFoundProgrammers = false;
+                OnPropertyChanged(nameof(ScanFoundNothing));
+                FoundProgrammersMessage = $"Error: {ex.Message}";
+                
+                MessageBox.Show(
+                    $"Failed to scan for programmers:\n\n{ex.Message}\n\nPlease check:\n- Library file exists: {SdkConfiguration.GetLibraryPath()}\n- Config file exists: {SdkConfiguration.GetConfigPath()}\n- App directory: {AppDomain.CurrentDomain.BaseDirectory}\n- Programmers are connected\n- Drivers are installed",
+                    "Scan Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
             }
         }
 
-        private void ProgrammerItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        private async void ProgrammerItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (sender is Border border && border.Tag is ProgrammerViewModel programmer)
             {
+                // Deselect all, select clicked one
                 foreach (var p in Programmers)
-                {
                     p.IsSelected = false;
-                }
+
                 programmer.IsSelected = true;
                 _selectedProgrammerInfo = programmer.ProgrammerInfo;
                 OnPropertyChanged(nameof(CanDiscover));
                 OnPropertyChanged(nameof(HasSelectedProgrammer));
                 OnPropertyChanged(nameof(SelectedProgrammerName));
+
+                // Auto-discover hearing aids when a programmer is selected
+                await DiscoverHearingAidsAsync();
             }
         }
 
         private async void DiscoverDevices_Click(object sender, RoutedEventArgs e)
+        {
+            await DiscoverHearingAidsAsync();
+        }
+
+        /// <summary>
+        /// Discovers hearing aids connected to the selected programmer.
+        /// Called automatically when selecting a programmer, or manually via button.
+        /// </summary>
+        private async Task DiscoverHearingAidsAsync()
         {
             if (_selectedProgrammerInfo == null)
             {
@@ -429,28 +457,36 @@ namespace Ul8ziz.FittingApp.App.Views
                 return;
             }
 
+            if (IsDiscovering) return; // Already discovering
+
+            System.Diagnostics.Debug.WriteLine($"=== Auto-discovering devices via {_selectedProgrammerInfo.Name} ===");
+
             IsDiscovering = true;
             HasFoundDevices = false;
             DiscoveryProgress = 0;
-            FoundDevicesMessage = string.Empty;
+            FoundDevicesMessage = $"Discovering hearing aids via {_selectedProgrammerInfo.Name}...";
+            LeftDevice = null;
+            RightDevice = null;
+            OnPropertyChanged(nameof(HasDevices));
+            OnPropertyChanged(nameof(CanConnect));
 
             try
             {
-                // Cancel any previous discovery
+                // Cancel any previous operation
                 _cancellationTokenSource?.Cancel();
+                _cancellationTokenSource?.Dispose();
                 _cancellationTokenSource = new CancellationTokenSource();
 
                 if (_deviceDiscoveryService == null)
-                {
                     throw new InvalidOperationException("Device discovery service not available.");
-                }
 
                 var progress = new Progress<int>(p =>
                 {
                     DiscoveryProgress = p;
+                    FoundDevicesMessage = $"Discovering hearing aids... {p}%";
                 });
 
-                // Discover both devices
+                // Discover both sides
                 var (leftDeviceInfo, rightDeviceInfo) = await _deviceDiscoveryService.DiscoverBothDevicesAsync(
                     _selectedProgrammerInfo,
                     progress,
@@ -466,7 +502,7 @@ namespace Ul8ziz.FittingApp.App.Views
                         SerialNumber = leftDeviceInfo.SerialNumber,
                         Firmware = leftDeviceInfo.Firmware,
                         BatteryLevel = leftDeviceInfo.BatteryLevel ?? 0,
-                        IsSelected = false
+                        IsSelected = true // Auto-select found devices
                     };
                     leftVm.PropertyChanged += (s, args) =>
                     {
@@ -477,10 +513,6 @@ namespace Ul8ziz.FittingApp.App.Views
                         }
                     };
                     LeftDevice = leftVm;
-                }
-                else
-                {
-                    LeftDevice = null;
                 }
 
                 // Update Right Device
@@ -493,7 +525,7 @@ namespace Ul8ziz.FittingApp.App.Views
                         SerialNumber = rightDeviceInfo.SerialNumber,
                         Firmware = rightDeviceInfo.Firmware,
                         BatteryLevel = rightDeviceInfo.BatteryLevel ?? 0,
-                        IsSelected = false
+                        IsSelected = true // Auto-select found devices
                     };
                     rightVm.PropertyChanged += (s, args) =>
                     {
@@ -505,42 +537,44 @@ namespace Ul8ziz.FittingApp.App.Views
                     };
                     RightDevice = rightVm;
                 }
-                else
-                {
-                    RightDevice = null;
-                }
 
                 var deviceCount = (leftDeviceInfo != null ? 1 : 0) + (rightDeviceInfo != null ? 1 : 0);
                 HasFoundDevices = deviceCount > 0;
-                FoundDevicesMessage = deviceCount > 0 
-                    ? $"Found {deviceCount} hearing aid(s)" 
-                    : "No hearing aids detected. Please check connections and try again.";
+
+                if (deviceCount > 0)
+                {
+                    FoundDevicesMessage = $"Found {deviceCount} hearing aid(s)";
+                    System.Diagnostics.Debug.WriteLine($"Discovery complete: {deviceCount} device(s) found");
+                }
+                else
+                {
+                    FoundDevicesMessage = "No hearing aids detected. Check that hearing aids are placed on the programmer.";
+                    System.Diagnostics.Debug.WriteLine("Discovery complete: no devices found");
+                }
                 
                 IsDiscovering = false;
                 OnPropertyChanged(nameof(HasDevices));
+                OnPropertyChanged(nameof(SelectedDevicesCount));
                 OnPropertyChanged(nameof(CanConnect));
             }
             catch (OperationCanceledException)
             {
                 IsDiscovering = false;
                 FoundDevicesMessage = "Discovery cancelled";
+                System.Diagnostics.Debug.WriteLine("Discovery cancelled");
             }
             catch (Exception ex)
             {
                 IsDiscovering = false;
                 HasFoundDevices = false;
-                FoundDevicesMessage = $"Error: {ex.Message}";
+                FoundDevicesMessage = $"Discovery failed: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"Discovery error: {ex.Message}");
                 
-                // Show error message to user
                 MessageBox.Show(
-                    $"Failed to discover devices:\n{ex.Message}",
+                    $"Failed to discover hearing aids:\n\n{ex.Message}\n\nMake sure hearing aids are placed on the programmer.",
                     "Discovery Error",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
-            }
-            finally
-            {
-                _deviceDiscoveryService?.Cleanup();
             }
         }
 
@@ -592,17 +626,17 @@ namespace Ul8ziz.FittingApp.App.Views
                     throw new InvalidOperationException("Device connection service not available.");
                 }
 
-                for (int i = 0; i < devicesToConnect.Count; i++)
+                var totalDevices = devicesToConnect.Count;
+                for (int i = 0; i < totalDevices; i++)
                 {
                     var (device, side) = devicesToConnect[i];
                     ConnectionStatusMessage = $"Connecting to {device.Side} device...";
 
+                    var deviceIndex = i; // Capture for closure
                     var progress = new Progress<int>(p =>
                     {
-                        // Calculate overall progress across all devices
-                        var baseProgress = (i * 100);
-                        var deviceProgress = (int)(p * (100.0 / devicesToConnect.Count));
-                        ConnectionProgress = baseProgress + deviceProgress;
+                        // Correct formula: each device gets an equal share of 100%
+                        ConnectionProgress = ((deviceIndex * 100) + p) / totalDevices;
                     });
 
                     var deviceInfo = await _deviceConnectionService.ConnectAsync(
@@ -655,23 +689,27 @@ namespace Ul8ziz.FittingApp.App.Views
                     MessageBoxImage.Error);
 
                 // Cleanup failed connections
-                try
+                if (_deviceConnectionService != null)
                 {
-                    if (LeftDevice?.IsSelected == true)
-                        await _deviceConnectionService?.DisconnectAsync(DeviceSide.Left);
-                    if (RightDevice?.IsSelected == true)
-                        await _deviceConnectionService?.DisconnectAsync(DeviceSide.Right);
-                }
-                catch
-                {
-                    // Ignore cleanup errors
+                    try
+                    {
+                        if (LeftDevice?.IsSelected == true)
+                            await _deviceConnectionService.DisconnectAsync(DeviceSide.Left);
+                    }
+                    catch { /* ignore cleanup errors */ }
+                    try
+                    {
+                        if (RightDevice?.IsSelected == true)
+                            await _deviceConnectionService.DisconnectAsync(DeviceSide.Right);
+                    }
+                    catch { /* ignore cleanup errors */ }
                 }
             }
         }
 
-        public event PropertyChangedEventHandler PropertyChanged;
+        public event PropertyChangedEventHandler? PropertyChanged;
 
-        protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null)
+        protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
@@ -766,10 +804,10 @@ namespace Ul8ziz.FittingApp.App.Views
         private bool _isSelected;
 
         public int Id { get; set; }
-        public string Name { get; set; }
-        public string SerialNumber { get; set; }
-        public string Firmware { get; set; }
-        public string Port { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string SerialNumber { get; set; } = string.Empty;
+        public string Firmware { get; set; } = string.Empty;
+        public string Port { get; set; } = string.Empty;
         
         // Store ProgrammerInfo for SDK operations
         public Ul8ziz.FittingApp.Device.DeviceCommunication.Models.ProgrammerInfo? ProgrammerInfo { get; set; }
@@ -780,9 +818,9 @@ namespace Ul8ziz.FittingApp.App.Views
             set { _isSelected = value; OnPropertyChanged(); }
         }
 
-        public event PropertyChangedEventHandler PropertyChanged;
+        public event PropertyChangedEventHandler? PropertyChanged;
 
-        protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null)
+        protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }

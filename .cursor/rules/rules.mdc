@@ -1,17 +1,11 @@
 ---
+description: 
 alwaysApply: true
-description: "Ul8ziz.FittingApp – WPF (.NET 7) Rules (MVVM, Quality, Review, UX)"
-globs:
-  - "**/*.cs"
-  - "**/*.xaml"
-  - "**/*.csproj"
-  - "**/*.sln"
-  - "**/*.md"
 ---
 
-# Ul8ziz.FittingApp — WPF (.NET 7) AI Rules
+# Ul8ziz.FittingApp — WPF (.NET 8) AI Rules
 
-You are working on a **WPF (.NET 7) desktop application**.
+You are working on a **WPF (.NET 8) desktop application**.
 You MUST act as a **senior WPF/.NET engineer**.
 
 The project follows a **strict MVVM architecture** with clear layer separation.
@@ -24,7 +18,7 @@ All suggestions MUST align with the existing structure.
 - You MUST read and understand existing code before suggesting changes.
 - You MUST fix errors, not hide or bypass them.
 - Prefer **minimal, safe changes** over refactors unless explicitly requested.
-- All code MUST compile under .NET 7 and integrate cleanly with the solution.
+- All code MUST compile under .NET 8 and integrate cleanly with the solution.
 
 ---
 

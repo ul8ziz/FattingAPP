@@ -46,7 +46,7 @@
                             HorizontalAlignment="Center" Height="64" Width="193">
                         <Image Source="pack://application:,,,/Resources/Images/AppLogo.png"
                                Width="156"
-                               Height="112"
+                               Height="56"
                                Stretch="Uniform"
                                VerticalAlignment="Center"
                                HorizontalAlignment="Center"/>

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using SDLib;
@@ -9,19 +10,24 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
     public class DeviceDiscoveryService
     {
         private readonly SdkManager _sdkManager;
-        private ICommunicationAdaptor? _commAdaptor;
 
         public DeviceDiscoveryService(SdkManager sdkManager)
         {
             _sdkManager = sdkManager ?? throw new ArgumentNullException(nameof(sdkManager));
         }
 
+        /// <summary>
+        /// Discovers a device on the specified side using the selected programmer.
+        /// Follows SDK example: BeginDetectDevice -> poll IsFinished -> GetResult -> EndDetectDevice
+        /// </summary>
         public async Task<Models.DeviceInfo?> DiscoverDeviceAsync(
             ProgrammerInfo programmer,
             DeviceSide side,
             IProgress<int>? progress = null,
             CancellationToken cancellationToken = default)
         {
+            ICommunicationAdaptor? commAdaptor = null;
+
             try
             {
                 progress?.Report(0);
@@ -29,183 +35,146 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 var productManager = _sdkManager.ProductManager;
                 var port = side == DeviceSide.Left ? CommunicationPort.kLeft : CommunicationPort.kRight;
 
-                // Create communication interface
-                ICommunicationAdaptor? commAdaptor = null;
-
+                // Create communication interface - following SDK example
                 if (programmer.Type == ProgrammerType.Wired)
                 {
-                    var settings = $"port={programmer.Port}";
+                    // SDK example: CreateCommunicationInterface(programmer, port, "")
                     commAdaptor = productManager.CreateCommunicationInterface(
                         programmer.InterfaceName,
                         port,
-                        settings);
+                        "");
                 }
-                else // Wireless
+                else
                 {
-                    if (!string.IsNullOrEmpty(programmer.DeviceId))
-                    {
-                        commAdaptor = productManager.CreateWirelessCommunicationInterface(programmer.DeviceId);
-                    }
-                    else
-                    {
+                    if (string.IsNullOrEmpty(programmer.DeviceId))
                         throw new InvalidOperationException("Device ID is required for wireless programmers");
-                    }
+
+                    commAdaptor = productManager.CreateWirelessCommunicationInterface(programmer.DeviceId);
                 }
 
                 if (commAdaptor == null)
-                {
                     throw new InvalidOperationException("Failed to create communication interface");
-                }
 
-                _commAdaptor = commAdaptor;
                 progress?.Report(20);
 
-                // Detect device - following SDK example pattern
+                // Detect device - following SDK example pattern exactly
+                // From Connection.GetDeviceInformationBlocking():
+                //   var monitor = CommAdaptor?.BeginDetectDevice();
+                //   while (!monitor?.IsFinished ?? false) { ... }
+                //   monitor?.GetResult();
+                //   ConnectedDeviceInfo = CommAdaptor?.EndDetectDevice(monitor);
                 var monitor = commAdaptor.BeginDetectDevice();
-                if (monitor != null)
+                if (monitor == null)
+                    throw new InvalidOperationException("BeginDetectDevice returned null");
+
+                var lastProgress = -1;
+
+                while (!monitor.IsFinished)
                 {
-                    var lastProgress = -1;
-                    
-                    while (!monitor.IsFinished)
-                    {
-                        if (cancellationToken.IsCancellationRequested)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Device discovery cancelled for {side} side");
-                            try
-                            {
-                                monitor.GetResult(); // Check for errors
-                                commAdaptor.EndDetectDevice(monitor);
-                            }
-                            catch
-                            {
-                                // Ignore cleanup errors
-                            }
-                            throw new OperationCanceledException();
-                        }
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                        await Task.Delay(300, cancellationToken);
-                        
-                        // Update progress if available
-                        var maxSteps = monitor.ProgressMaximum;
-                        var currentProgress = monitor.GetProgressValue();
-                        if (maxSteps > 0 && lastProgress != currentProgress)
-                        {
-                            lastProgress = currentProgress;
-                            var progressPercent = 20 + (int)(((double)currentProgress / maxSteps) * 70);
-                            progress?.Report(progressPercent);
-                        }
+                    await Task.Delay(300, cancellationToken);
+
+                    var maxSteps = monitor.ProgressMaximum;
+                    var pr = monitor.GetProgressValue();
+                    if (maxSteps > 0 && lastProgress != pr)
+                    {
+                        lastProgress = pr;
+                        progress?.Report(20 + (int)(((double)pr / maxSteps) * 70));
                     }
-                    
-                    // Get result and check for errors
-                    monitor.GetResult();
-                    
-                    // Get device information
-                    var sdkDeviceInfo = commAdaptor.EndDetectDevice(monitor);
-                    progress?.Report(100);
-                    
-                    if (sdkDeviceInfo == null)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"No device detected on {side} side");
-                        return null;
-                    }
-
-                    System.Diagnostics.Debug.WriteLine($"Device discovered on {side} side: ProductId={sdkDeviceInfo.ProductId}, SerialId={sdkDeviceInfo.SerialId}");
-
-                    // Convert to our DeviceInfo model
-                    return new Models.DeviceInfo
-                    {
-                        Side = side,
-                        Model = sdkDeviceInfo.ProductId.ToString(),
-                        SerialNumber = sdkDeviceInfo.SerialId != 0 ? sdkDeviceInfo.SerialId.ToString() : (sdkDeviceInfo.HybridSerial != 0 ? sdkDeviceInfo.HybridSerial.ToString() : "Unknown"),
-                        Firmware = sdkDeviceInfo.FirmwareId.ToString(),
-                        HybridId = sdkDeviceInfo.HybridId != 0 ? sdkDeviceInfo.HybridId.ToString() : null,
-                        HybridSerial = sdkDeviceInfo.HybridSerial != 0 ? sdkDeviceInfo.HybridSerial.ToString() : null,
-                        ProductId = sdkDeviceInfo.ProductId != 0 ? sdkDeviceInfo.ProductId.ToString() : null,
-                        ChipId = sdkDeviceInfo.ChipId != 0 ? sdkDeviceInfo.ChipId.ToString() : null,
-                        IsDetected = true
-                    };
                 }
-                
-                return null;
+
+                // Check for errors
+                monitor.GetResult();
+
+                // Get device information
+                var sdkDeviceInfo = commAdaptor.EndDetectDevice(monitor);
+                progress?.Report(100);
+
+                if (sdkDeviceInfo == null)
+                {
+                    Debug.WriteLine($"No device detected on {side} side");
+                    return null;
+                }
+
+                Debug.WriteLine($"Device discovered on {side}: Product={sdkDeviceInfo.ProductId}, Serial={sdkDeviceInfo.SerialId}");
+
+                return new Models.DeviceInfo
+                {
+                    Side = side,
+                    Model = sdkDeviceInfo.ProductId.ToString(),
+                    SerialNumber = sdkDeviceInfo.SerialId != 0
+                        ? sdkDeviceInfo.SerialId.ToString()
+                        : (sdkDeviceInfo.HybridSerial != 0 ? sdkDeviceInfo.HybridSerial.ToString() : "Unknown"),
+                    Firmware = sdkDeviceInfo.FirmwareId.ToString(),
+                    HybridId = sdkDeviceInfo.HybridId != 0 ? sdkDeviceInfo.HybridId.ToString() : null,
+                    HybridSerial = sdkDeviceInfo.HybridSerial != 0 ? sdkDeviceInfo.HybridSerial.ToString() : null,
+                    ProductId = sdkDeviceInfo.ProductId != 0 ? sdkDeviceInfo.ProductId.ToString() : null,
+                    ChipId = sdkDeviceInfo.ChipId != 0 ? sdkDeviceInfo.ChipId.ToString() : null,
+                    IsDetected = true
+                };
             }
             catch (OperationCanceledException)
             {
-                System.Diagnostics.Debug.WriteLine($"Device discovery cancelled for {side} side");
-                throw;
+                Debug.WriteLine($"Device discovery cancelled for {side} side");
+                throw; // Preserve cancellation signal
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error discovering device on {side} side: {ex.Message}");
+                Debug.WriteLine($"Error discovering device on {side} side: {ex.Message}");
                 throw new InvalidOperationException($"Failed to discover device on {side} side: {ex.Message}", ex);
             }
             finally
             {
-                // Cleanup communication adaptor on error
-                if (_commAdaptor != null)
-                {
-                    try
-                    {
-                        _commAdaptor.CloseDevice();
-                    }
-                    catch
-                    {
-                        // Ignore cleanup errors
-                    }
-                    _commAdaptor = null;
-                }
+                // Close the adaptor used for discovery
+                try { commAdaptor?.CloseDevice(); }
+                catch { /* ignore close errors */ }
             }
         }
 
+        /// <summary>
+        /// Discovers devices on both sides. Continues if one side fails.
+        /// </summary>
         public async Task<(Models.DeviceInfo? Left, Models.DeviceInfo? Right)> DiscoverBothDevicesAsync(
             ProgrammerInfo programmer,
             IProgress<int>? progress = null,
             CancellationToken cancellationToken = default)
         {
-            Models.DeviceInfo? leftDeviceInfo = null;
-            Models.DeviceInfo? rightDeviceInfo = null;
+            Models.DeviceInfo? leftDevice = null;
+            Models.DeviceInfo? rightDevice = null;
 
+            // Discover left device
+            progress?.Report(0);
             try
             {
-                // Discover left device
-                progress?.Report(0);
-                leftDeviceInfo = await DiscoverDeviceAsync(
-                    programmer,
-                    DeviceSide.Left,
+                leftDevice = await DiscoverDeviceAsync(
+                    programmer, DeviceSide.Left,
                     new Progress<int>(p => progress?.Report(p / 2)),
                     cancellationToken);
-
-                // Discover right device
-                progress?.Report(50);
-                rightDeviceInfo = await DiscoverDeviceAsync(
-                    programmer,
-                    DeviceSide.Right,
-                    new Progress<int>(p => progress?.Report(50 + (p / 2))),
-                    cancellationToken);
-
-                progress?.Report(100);
             }
-            catch
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
             {
-                // If discovery fails, return what we have
+                Debug.WriteLine($"Left device discovery failed: {ex.Message}");
             }
 
-            return (leftDeviceInfo, rightDeviceInfo);
-        }
-
-        public void Cleanup()
-        {
+            // Discover right device
+            progress?.Report(50);
             try
             {
-                _commAdaptor?.CloseDevice();
+                rightDevice = await DiscoverDeviceAsync(
+                    programmer, DeviceSide.Right,
+                    new Progress<int>(p => progress?.Report(50 + (p / 2))),
+                    cancellationToken);
             }
-            catch
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
             {
-                // Ignore cleanup errors
+                Debug.WriteLine($"Right device discovery failed: {ex.Message}");
             }
-            finally
-            {
-                _commAdaptor = null;
-            }
+
+            progress?.Report(100);
+            return (leftDevice, rightDevice);
         }
     }
 }

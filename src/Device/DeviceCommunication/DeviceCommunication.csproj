@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -21,13 +22,27 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Copy all SDK DLLs to output -->
     <None Include="..\Libs\*.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Copy SDCOM manifest -->
+    <None Include="..\Libs\SDCOM.dll.manifest">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- Copy SDK config -->
     <None Include="..\Libs\sd.config">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="app.config" />
+    <!-- Copy product library file -->
+    <None Include="..\Libs\E7160SL.library">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- Copy RSL10 wireless DLLs to rsl10 subfolder -->
+    <None Include="..\Libs\rsl10\*.*">
+      <Link>rsl10\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
