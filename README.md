@@ -16,7 +16,7 @@ Ul8ziz.FittingApp provides a modern, maintainable codebase for hearing aid fitti
 
 ## Technology Stack
 
-- **.NET 7** with Windows Presentation Foundation (WPF)
+- **.NET 10** with Windows Presentation Foundation (WPF) (required by current sdnet.dll; see note below)
 - **C#** for application logic
 - **Ezairo Sound Designer SDK** for device communication
 - **SQLite** for local data persistence
@@ -44,7 +44,7 @@ Before building or running the application, ensure the following are installed:
 
 - **Windows 10/11**
 - **Visual Studio 2022** with Desktop development workload (WPF)
-- **.NET SDK 7.0**
+- **.NET SDK 10.0** (the solution uses `global.json` to request SDK 10; required because `sdnet.dll` targets .NET 10)
 - **Ezairo Sound Designer SDK** present at `./SoundDesignerSDK/` (read-only folder)
   - **Note:** If the SDK is located elsewhere (e.g., inside "Ezairo Pre Suite Firmware, Sound Designer and SDK" package), ensure the **inner** `SoundDesignerSDK` folder (containing `binaries/`, `documentation/`, `samples/`, etc.) is accessible. The SDK root should contain `binaries/win32/` with `sd.config` and DLLs.
 
@@ -107,6 +107,32 @@ This PATH entry is required for the SDK to locate the HI-PRO communication libra
 - **CAA / Promira: "Driver OK, hardware not connected"**  
   The driver is installed but no device is detected. Connect the programmer via USB and ensure it is powered on.
 
+- **HI-PRO: E_INVALID_STATE**  
+  This usually means another process is using the HI-PRO driver (e.g. **HiProMonitorService**, **Starkey Inspire** services). The SDK/CTK then rejects our app’s connection. **Fix:** From the project root run `powershell -ExecutionPolicy Bypass -File scripts/close-programmer-apps.ps1 -Close`, confirm with **Y** to close those processes, then **restart this app** and click **Scan Wired** again. Also ensure HI-PRO is on COM1–COM4 in Device Manager if possible.
+
+- **Wireless (NOAHlink / RSL10): E_CALL_SCAN**  
+  The SDK requires `BeginScanForWirelessDevices` to be called before creating a wireless interface. The app calls it automatically before scanning wireless programmers and waits ~2.5 s for discovery. Ensure Bluetooth is on and the wireless programmer is in range and paired.
+
+### Verify COM and USB from the console (without running the app)
+
+You can check that COM ports and USB devices (e.g. HI-PRO) are visible before opening the application:
+
+- **PowerShell script (recommended):** From the project root run  
+  `powershell -ExecutionPolicy Bypass -File scripts/check-com-usb.ps1`  
+  This lists: COM ports (as .NET sees them), COM/Serial/HI-PRO devices from WMI, USB devices, and HI-PRO specifically.
+
+- **One-liners:**
+  - COM port names (same as the app uses):  
+    `powershell -Command "[System.IO.Ports.SerialPort]::GetPortNames()"`
+  - HI-PRO and COM devices:  
+    `powershell -Command "Get-CimInstance Win32_PnPEntity | Where-Object { $_.Name -match 'HI-PRO|COM\d+' } | Select-Object Name, Status"`
+
+- **Close programs using the programmer (so the app can use HI-PRO):**  
+  `powershell -ExecutionPolicy Bypass -File scripts/close-programmer-apps.ps1`  
+  This checks which COM ports are in use and lists known programmer-related processes (e.g. HI-PRO Configuration, Starkey Inspire services). To close them:  
+  `powershell -ExecutionPolicy Bypass -File scripts/close-programmer-apps.ps1 -Close`  
+  (You will be asked to confirm before any process is closed.)
+
 ## Setup Steps
 
 ### 1. Copy SDK Runtime Files
@@ -131,7 +157,24 @@ This script checks for required SDK folders and validates that runtime dependenc
 
 ### 3. Build the Solution
 
-Open `Ul8ziz.FittingApp.sln` in Visual Studio 2022 and build the solution. The application targets **x86 (32-bit)** to ensure compatibility with the CTK HI-PRO communication module.
+Open `Ul8ziz.FittingApp.sln` in Visual Studio 2022 and build the solution. The application targets **.NET 10** and **x86 (32-bit)** to match the supplied `sdnet.dll` and ensure compatibility with the CTK HI-PRO communication module.
+
+#### Build instructions
+
+1. Install **.NET SDK 10.0** if needed (see [downloads](https://dotnet.microsoft.com/download)).
+2. Close Visual Studio (and any running instance of the app).
+3. Delete `bin` and `obj` folders in the solution and in each project (e.g. `src\App\bin`, `src\App\obj`, `src\Device\DeviceCommunication\bin`, `src\Device\DeviceCommunication\obj`).
+4. From the solution root, run:
+   - `dotnet --info` (confirm .NET SDK in use)
+   - `dotnet --list-sdks` (ensure 10.0.x is listed)
+   - `dotnet clean`
+   - `dotnet build`
+5. Reopen the solution in Visual Studio.
+6. Verify:
+   - Build output folder is `src\App\bin\Debug\net10.0-windows`.
+   - Run the app and use "Search for Programmers" to verify HI-PRO scan works.
+
+**Current target: .NET 10.** The `sdnet.dll` in `src/Device/Libs/` is built for .NET 10 (System.Runtime 10.0), so the solution targets `net10.0-windows` / `net10.0` and `global.json` requests SDK 10. If you obtain an sdnet built for .NET 8, you can switch the projects back to `net8.0-windows` / `net8.0` and use .NET 8 SDK.
 
 ## Documentation
 
@@ -143,4 +186,5 @@ Open `Ul8ziz.FittingApp.sln` in Visual Studio 2022 and build the solution. The a
 - The `SoundDesignerSDK/` folder is treated as read-only. Do not modify files within this directory.
 - SDK runtime files are copied into `src/Device/Libs/` by the setup scripts. These files are tracked in the repository.
 - The application targets **Windows x86 (32-bit)** because the CTK HI-PRO communication module (`HI-PRO.dll`) is only available in 32-bit. The SDK provides both win32 and win64 binaries; this project uses `win32`.
+- **Programmer scan:** The scan runs on the UI thread (same thread as SDK initialization) to satisfy CTK/SDNET COM thread affinity and avoid E_INVALID_STATE. The window may be briefly unresponsive during the scan. Wireless scan calls `BeginScanForWirelessDevices` before creating wireless interfaces to satisfy the SDK (avoids E_CALL_SCAN).
 - **SDK Path:** The project expects the SDK at `./SoundDesignerSDK/` relative to the repository root. If your SDK is in a different location (e.g., `C:\Users\...\Ezairo Pre Suite Firmware, Sound Designer and SDK\SoundDesignerSDK\SoundDesignerSDK`), ensure the **inner** `SoundDesignerSDK` folder (the one containing `binaries/`, `documentation/`, `samples/`) is accessible. Setup scripts should reference this SDK root path.

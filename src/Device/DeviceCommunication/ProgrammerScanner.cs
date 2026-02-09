@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO.Ports;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using SDLib;
@@ -14,13 +15,21 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
     {
         private readonly SdkManager _sdkManager;
 
+        /// <summary>Ensures only one scan runs at a time (CTK/SDNET are not thread-safe).</summary>
+        private static readonly SemaphoreSlim _scanLock = new SemaphoreSlim(1, 1);
+
         // Supported wired programmer names (must match sd.config interface_name).
-        // HI-PRO first so CTK state is clean (CAA CheckDevice can leave E_INVALID_STATE and break subsequent HI-PRO attempts).
+        // Currently HI-PRO only; CAA and Promira can be re-added to the list later if needed.
         private readonly List<string> _wiredProgrammers = new()
         {
             Constants.HiPro,     // HI-PRO
-            Constants.Caa,       // Communication Accelerator Adaptor
-            Constants.Promira,   // Promira
+        };
+
+        // Wireless programmer interface names (must match sd.config: NOAHlink, and SDK for RSL10).
+        private static readonly List<string> _wirelessProgrammers = new()
+        {
+            "NOAHlink",  // sd.config interface_name
+            Constants.Rsl10,
         };
 
         public ProgrammerScanner(SdkManager sdkManager)
@@ -495,6 +504,540 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         }
 
         /// <summary>
+        /// Synchronous scan for programmers. Must be called from an STA thread (e.g. UI thread).
+        /// Only one scan runs at a time (SemaphoreSlim). Uses SerialPort.GetPortNames() for real COM ports.
+        /// If scan runs on the UI thread, pass yieldToUI so that the Cancel button can be processed (e.g. pump Dispatcher messages).
+        /// </summary>
+        /// <param name="progress">Progress reporter 0-100.</param>
+        /// <param name="cancellationToken">Cancellation token; check when user clicks Cancel.</param>
+        /// <param name="yieldToUI">Optional: invoke to process UI messages (e.g. Dispatcher.PushFrame) so Cancel is responsive.</param>
+        public ScanResult ScanAllProgrammersSync(
+            IProgress<int>? progress,
+            CancellationToken cancellationToken,
+            Action? yieldToUI = null)
+        {
+            _scanLock.Wait(cancellationToken);
+            try
+            {
+                Debug.WriteLine("[ScanAllProgrammersSync] Acquired scan lock; starting sync scan on current thread.");
+                var result = new ScanResult();
+                ScanForWiredProgrammersSyncCore(result, progress, cancellationToken, yieldToUI);
+                ScanForWirelessProgrammersSyncCore(result, progress, cancellationToken, yieldToUI);
+                progress?.Report(100);
+                Debug.WriteLine($"[ScanAllProgrammersSync] Scan complete. Found: {result.FoundProgrammers.Count} (wired + wireless)");
+                return result;
+            }
+            finally
+            {
+                _scanLock.Release();
+                Debug.WriteLine("[ScanAllProgrammersSync] Released scan lock.");
+            }
+        }
+
+        /// <summary>
+        /// Synchronous scan for wired programmers only (e.g. HI-PRO). Same thread and yield rules as ScanAllProgrammersSync.
+        /// </summary>
+        public ScanResult ScanWiredOnlySync(
+            IProgress<int>? progress,
+            CancellationToken cancellationToken,
+            Action? yieldToUI = null)
+        {
+            _scanLock.Wait(cancellationToken);
+            try
+            {
+                Debug.WriteLine("[ScanWiredOnlySync] Starting wired-only scan.");
+                var result = new ScanResult();
+                ScanForWiredProgrammersSyncCore(result, progress, cancellationToken, yieldToUI);
+                progress?.Report(100);
+                Debug.WriteLine($"[ScanWiredOnlySync] Complete. Found: {result.FoundProgrammers.Count}");
+                return result;
+            }
+            finally
+            {
+                _scanLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Synchronous scan for wireless programmers only (e.g. NOAHlink, RSL10). Same thread and yield rules as ScanAllProgrammersSync.
+        /// </summary>
+        public ScanResult ScanWirelessOnlySync(
+            IProgress<int>? progress,
+            CancellationToken cancellationToken,
+            Action? yieldToUI = null)
+        {
+            _scanLock.Wait(cancellationToken);
+            try
+            {
+                Debug.WriteLine("[ScanWirelessOnlySync] Starting wireless-only scan.");
+                var result = new ScanResult();
+                ScanForWirelessProgrammersSyncCore(result, progress, cancellationToken, yieldToUI);
+                progress?.Report(100);
+                Debug.WriteLine($"[ScanWirelessOnlySync] Complete. Found: {result.FoundProgrammers.Count}");
+                return result;
+            }
+            finally
+            {
+                _scanLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Core synchronous scan logic for wired programmers. Caller must hold _scanLock and run on STA thread.
+        /// HI-PRO: Strategy A (SDK interface enumeration) then Strategy B (WMI-detected COM port only).
+        /// Progress 0-50%. yieldToUI is invoked periodically so the UI can process Cancel.
+        /// </summary>
+        private void ScanForWiredProgrammersSyncCore(
+            ScanResult result,
+            IProgress<int>? progress,
+            CancellationToken cancellationToken,
+            Action? yieldToUI = null)
+        {
+            var productManager = _sdkManager.ProductManager;
+
+            ScanDiagnostics.WriteStartupAndScanPreamble();
+            ScanDiagnostics.WriteSdkInterfaceList(productManager);
+            LogEnvironmentDiagnostics();
+            Thread.Sleep(400);
+            progress?.Report(5);
+
+            int totalChecks = _wiredProgrammers.Count;
+            int currentCheck = 0;
+
+            foreach (var programmerName in _wiredProgrammers)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yieldToUI?.Invoke();
+
+                var attempt = new ScanAttemptResult
+                {
+                    ProgrammerName = programmerName,
+                    DisplayName = GetProgrammerDisplayName(programmerName)
+                };
+
+                try
+                {
+                    Debug.WriteLine($"[Scan] Trying programmer: {programmerName}");
+
+                    if (programmerName == Constants.HiPro)
+                    {
+                        HiproScanStrategyAThenB(productManager, result, attempt, programmerName, cancellationToken, yieldToUI);
+                    }
+                    else
+                    {
+                        // CAA, Promira: default USB
+                        if (SdkScanHelper.TryCheckDevice(productManager, programmerName, "", out var err))
+                        {
+                            attempt.Found = true;
+                            result.FoundProgrammers.Add(CreateProgrammerInfo(result.FoundProgrammers.Count + 1, attempt.DisplayName, programmerName, "USB"));
+                        }
+                        else
+                        {
+                            attempt.ErrorCode = "NOT_CONNECTED";
+                            attempt.ErrorMessage = err;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    attempt.Found = false;
+                    attempt.ErrorMessage = ex.Message;
+                    Debug.WriteLine($"[Scan] EXCEPTION for {programmerName}: {ex.GetType().Name}: {ex.Message}");
+                    var fullMsg = ex.ToString();
+                    if (fullMsg.Contains("E_UNKNOWN_NAME")) attempt.ErrorCode = "E_UNKNOWN_NAME";
+                    else if (fullMsg.Contains("E_INVALID_STATE")) attempt.ErrorCode = "E_INVALID_STATE";
+                    else if (fullMsg.Contains("E_NOT_FOUND")) attempt.ErrorCode = "E_NOT_FOUND";
+                    else attempt.ErrorCode = "UNKNOWN";
+                    attempt.ErrorMessage = $"{ex.GetType().Name}: {ex.Message}";
+                    if (ex.InnerException != null) attempt.ErrorMessage += $" | Inner: {ex.InnerException.Message}";
+                }
+
+                result.AllAttempts.Add(attempt);
+                currentCheck++;
+                progress?.Report(5 + (int)((currentCheck / (double)totalChecks) * 45));
+                Thread.Sleep(100);
+            }
+        }
+
+        /// <summary>
+        /// Strategy A: SDK communication interface enumeration. Strategy B: WMI HI-PRO COM port only.
+        /// One attempt at a time; TryCheckDevice does create/check/close. No concurrent CTK calls.
+        /// </summary>
+        private void HiproScanStrategyAThenB(
+            IProductManager productManager,
+            ScanResult result,
+            ScanAttemptResult attempt,
+            string programmerName,
+            CancellationToken cancellationToken,
+            Action? yieldToUI)
+        {
+            Thread.Sleep(300);
+            yieldToUI?.Invoke();
+
+            // Strategy A: SDK interface list (prefer HI-PRO / VID_0C33 PID_0012)
+            var interfaces = SdkScanHelper.GetSdkCommunicationInterfaces(productManager);
+            if (interfaces.Count > 0)
+            {
+                Debug.WriteLine($"[Scan] HI-PRO Strategy A: trying {interfaces.Count} SDK interface(s)");
+                foreach (var ifStr in interfaces)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yieldToUI?.Invoke();
+                    if (SdkScanHelper.TryCheckDevice(productManager, programmerName, ifStr, out var err))
+                    {
+                        attempt.Found = true;
+                        var portLabel = ifStr.IndexOf("COM", StringComparison.OrdinalIgnoreCase) >= 0 ? ifStr : "USB";
+                        result.FoundProgrammers.Add(CreateProgrammerInfo(result.FoundProgrammers.Count + 1, attempt.DisplayName, programmerName, portLabel));
+                        Debug.WriteLine($"[Scan] CONFIRMED: HI-PRO via SDK interface: {ifStr}");
+                        return;
+                    }
+                    Debug.WriteLine($"[Scan] HI-PRO interface '{ifStr}': {err}");
+                    Thread.Sleep(80);
+                }
+            }
+
+            // Strategy B: WMI-detected HI-PRO COM port only (e.g. COM2); never COM3/COM4 unless matched by VID/PID
+            var hiproCom = HiproWmiHelper.GetHiproComPortFromWmi("0C33", "0012");
+            if (!string.IsNullOrEmpty(hiproCom))
+            {
+                int portNum = ParseComNumber(hiproCom);
+                var settingsToTry = new List<string> { $"port={hiproCom}" };
+                if (portNum > 0) settingsToTry.Add($"port={portNum}");
+                Debug.WriteLine($"[Scan] HI-PRO Strategy B: trying WMI port {hiproCom} only");
+                foreach (var settings in settingsToTry)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yieldToUI?.Invoke();
+                    if (SdkScanHelper.TryCheckDevice(productManager, programmerName, settings, out var err))
+                    {
+                        attempt.Found = true;
+                        result.FoundProgrammers.Add(CreateProgrammerInfo(result.FoundProgrammers.Count + 1, attempt.DisplayName, programmerName, hiproCom));
+                        Debug.WriteLine($"[Scan] CONFIRMED: HI-PRO on {hiproCom}");
+                        return;
+                    }
+                    if (IsPortInUseExceptionFromMessage(err) && !attempt.ComPortsInUse.Contains(hiproCom))
+                        attempt.ComPortsInUse.Add(hiproCom);
+                    Thread.Sleep(80);
+                }
+            }
+
+            attempt.ErrorCode = "NOT_CONNECTED";
+            attempt.ErrorMessage = interfaces.Count > 0
+                ? "Interface enumeration and WMI fallback did not detect HI-PRO"
+                : (hiproCom == null ? "No HI-PRO COM port found via WMI (VID_0C33 PID_0012)" : "WMI HI-PRO port tried but not detected");
+            attempt.HiproComPortsTriedCount = hiproCom != null ? 1 : 0;
+            Debug.WriteLine($"[Scan] HI-PRO NOT CONNECTED");
+        }
+
+        private static bool IsPortInUseExceptionFromMessage(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return false;
+            return message.IndexOf("access denied", StringComparison.OrdinalIgnoreCase) >= 0
+                   || message.IndexOf("in use", StringComparison.OrdinalIgnoreCase) >= 0
+                   || message.IndexOf("being used", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static ProgrammerInfo CreateProgrammerInfo(int id, string displayName, string interfaceName, string port)
+        {
+            return new ProgrammerInfo
+            {
+                Id = id,
+                Name = displayName,
+                Type = ProgrammerType.Wired,
+                InterfaceName = interfaceName,
+                Port = port,
+                IsAvailable = true
+            };
+        }
+
+        private static ProgrammerInfo CreateWirelessProgrammerInfo(int id, string displayName, string interfaceName, string deviceId)
+        {
+            return new ProgrammerInfo
+            {
+                Id = id,
+                Name = displayName,
+                Type = ProgrammerType.Wireless,
+                InterfaceName = interfaceName,
+                DeviceId = deviceId,
+                Port = null,
+                IsAvailable = true
+            };
+        }
+
+        /// <summary>
+        /// Scans for wireless programmers (NOAHlink, RSL10). Calls BeginScanForWirelessDevices first if available (required by SDK),
+        /// then CreateWirelessCommunicationInterface. Caller must hold _scanLock and run on STA thread.
+        /// </summary>
+        private void ScanForWirelessProgrammersSyncCore(ScanResult result, IProgress<int>? progress, CancellationToken cancellationToken, Action? yieldToUI = null)
+        {
+            var productManager = _sdkManager.ProductManager;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            yieldToUI?.Invoke();
+
+            // SDK requires BeginScanForWirelessDevices before CreateWirelessCommunicationInterface (E_CALL_SCAN otherwise)
+            if (TryBeginScanForWirelessDevices(productManager))
+            {
+                // Allow time for wireless scan to discover devices; yield periodically so Cancel works
+                for (int i = 0; i < 25 && !cancellationToken.IsCancellationRequested; i++)
+                {
+                    Thread.Sleep(100);
+                    yieldToUI?.Invoke();
+                }
+            }
+
+            int total = _wirelessProgrammers.Count;
+            int current = 0;
+
+            foreach (var interfaceName in _wirelessProgrammers)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yieldToUI?.Invoke();
+
+                var attempt = new ScanAttemptResult
+                {
+                    ProgrammerName = interfaceName,
+                    DisplayName = GetProgrammerDisplayName(interfaceName)
+                };
+
+                try
+                {
+                    Debug.WriteLine($"[Scan] Wireless: trying {interfaceName}");
+
+                    // Try empty device ID first (some SDKs use it for "first available" or default).
+                    ICommunicationAdaptor? commAdaptor = null;
+                    try
+                    {
+                        commAdaptor = productManager.CreateWirelessCommunicationInterface("");
+                        if (commAdaptor != null)
+                        {
+                            bool check = false;
+                            try { check = commAdaptor.CheckDevice(); }
+                            catch (Exception ex) { Debug.WriteLine($"[Scan] Wireless {interfaceName} CheckDevice: {ex.Message}"); }
+                            if (check)
+                            {
+                                attempt.Found = true;
+                                result.FoundProgrammers.Add(CreateWirelessProgrammerInfo(result.FoundProgrammers.Count + 1, attempt.DisplayName, interfaceName, ""));
+                                Debug.WriteLine($"[Scan] CONFIRMED: Wireless {interfaceName} (default)");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[Scan] Wireless {interfaceName} CreateWirelessCommunicationInterface(\"\"): {ex.GetType().Name}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        if (commAdaptor != null && !attempt.Found)
+                        {
+                            try { commAdaptor.CloseDevice(); } catch { }
+                        }
+                    }
+
+                    // Optional: try to enumerate wireless device IDs via reflection (e.g. GetWirelessDeviceList).
+                    if (!attempt.Found)
+                    {
+                        var deviceIds = TryGetWirelessDeviceIdsFromSdk(productManager);
+                        foreach (var deviceId in deviceIds)
+                        {
+                            if (attempt.Found) break;
+                            cancellationToken.ThrowIfCancellationRequested();
+                            yieldToUI?.Invoke();
+                            commAdaptor = null;
+                            try
+                            {
+                                commAdaptor = productManager.CreateWirelessCommunicationInterface(deviceId);
+                                if (commAdaptor != null)
+                                {
+                                    bool check = false;
+                                    try { check = commAdaptor.CheckDevice(); }
+                                    catch { }
+                                    if (check)
+                                    {
+                                        attempt.Found = true;
+                                        result.FoundProgrammers.Add(CreateWirelessProgrammerInfo(result.FoundProgrammers.Count + 1, attempt.DisplayName, interfaceName, deviceId));
+                                        Debug.WriteLine($"[Scan] CONFIRMED: Wireless {interfaceName} DeviceId={deviceId}");
+                                    }
+                                }
+                            }
+                            catch { /* ignore */ }
+                            finally
+                            {
+                                if (commAdaptor != null && !attempt.Found) try { commAdaptor.CloseDevice(); } catch { }
+                            }
+                        }
+                    }
+
+                    if (!attempt.Found)
+                    {
+                        attempt.ErrorCode = "NOT_CONNECTED";
+                        attempt.ErrorMessage = "No wireless programmer detected. Ensure Bluetooth is on and NOAHlink/RSL10 is in range.";
+                        Debug.WriteLine($"[Scan] Wireless {interfaceName}: NOT CONNECTED");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    attempt.Found = false;
+                    attempt.ErrorCode = "UNKNOWN";
+                    attempt.ErrorMessage = ex.Message;
+                    Debug.WriteLine($"[Scan] Wireless {interfaceName} EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+                }
+
+                result.AllAttempts.Add(attempt);
+                current++;
+                progress?.Report(50 + (int)((current / (double)total) * 50));
+                Thread.Sleep(100);
+            }
+        }
+
+        /// <summary>
+        /// Calls BeginScanForWirelessDevices on the product manager (required by SDK before CreateWirelessCommunicationInterface).
+        /// Tries all overloads (0 args, int, string, etc.). If return is IAsyncResult, calls EndScanForWirelessDevices after wait.
+        /// Returns true if the call was made successfully.
+        /// </summary>
+        private static bool TryBeginScanForWirelessDevices(IProductManager productManager)
+        {
+            if (productManager == null) return false;
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
+            Type? type = productManager.GetType();
+            while (type != null)
+            {
+                foreach (var method in type.GetMethods(flags))
+                {
+                    if (!method.Name.Equals("BeginScanForWirelessDevices", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    var parameters = method.GetParameters();
+                    string sig = string.Join(", ", parameters.Select(p => p.ParameterType.Name));
+                    Debug.WriteLine($"[Scan] Wireless: trying BeginScanForWirelessDevices({sig}) on {type.Name}");
+                    object[]? args = TryBuildArguments(parameters);
+                    if (args == null)
+                        continue;
+                    try
+                    {
+                        object? result = method.Invoke(productManager, args);
+                        Debug.WriteLine($"[Scan] Wireless: BeginScanForWirelessDevices({sig}) called successfully on {type.Name}");
+                        if (result != null)
+                            TryEndScanForWirelessDevices(productManager, result);
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        string inner = ex.InnerException != null ? $" | Inner: {ex.InnerException.Message}" : "";
+                        Debug.WriteLine($"[Scan] Wireless: BeginScanForWirelessDevices({sig}) failed: {ex.Message}{inner}");
+                    }
+                }
+                type = type.BaseType;
+            }
+            try
+            {
+                var t = productManager.GetType();
+                var scanMethods = t.GetMethods(flags).Where(m => m.Name.IndexOf("Scan", StringComparison.OrdinalIgnoreCase) >= 0 || m.Name.IndexOf("Wireless", StringComparison.OrdinalIgnoreCase) >= 0).Select(m => m.Name).Distinct().ToList();
+                if (scanMethods.Count > 0)
+                    Debug.WriteLine($"[Scan] Wireless: ProductManager type={t.FullName}; scan/wireless methods: [{string.Join(", ", scanMethods)}]");
+            }
+            catch { /* ignore */ }
+            return false;
+        }
+
+        /// <summary>Builds argument array for BeginScanForWirelessDevices; returns null if we cannot build sensible args.</summary>
+        private static object[]? TryBuildArguments(ParameterInfo[] parameters)
+        {
+            if (parameters.Length == 0) return Array.Empty<object>();
+            var args = new object[parameters.Length];
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                var p = parameters[i];
+                Type pt = p.ParameterType;
+                if (pt == typeof(int)) { args[i] = 5000; continue; }
+                if (pt == typeof(long)) { args[i] = 5000L; continue; }
+                if (pt == typeof(string)) { args[i] = ""; continue; }
+                if (pt == typeof(bool)) { args[i] = false; continue; }
+                if (pt.IsValueType && Nullable.GetUnderlyingType(pt) == null) { args[i] = Activator.CreateInstance(pt)!; continue; }
+                return null;
+            }
+            return args;
+        }
+
+        /// <summary>Calls EndScanForWirelessDevices if result is IAsyncResult or Task; waits for completion.</summary>
+        private static void TryEndScanForWirelessDevices(IProductManager productManager, object asyncResult)
+        {
+            if (productManager == null || asyncResult == null) return;
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
+            Type? type = productManager.GetType();
+            while (type != null)
+            {
+                var endMethod = type.GetMethods(flags).FirstOrDefault(m =>
+                    m.Name.Equals("EndScanForWirelessDevices", StringComparison.OrdinalIgnoreCase) &&
+                    m.GetParameters().Length == 1);
+                if (endMethod != null)
+                {
+                    try
+                    {
+                        if (asyncResult is System.IAsyncResult iar && !iar.IsCompleted)
+                        {
+                            try
+                            {
+                                if (iar.AsyncWaitHandle != null)
+                                    iar.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(6));
+                            }
+                            catch { /* ignore */ }
+                        }
+                        endMethod.Invoke(productManager, new[] { asyncResult });
+                        Debug.WriteLine("[Scan] Wireless: EndScanForWirelessDevices called");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[Scan] Wireless: EndScanForWirelessDevices: {ex.Message}");
+                    }
+                    return;
+                }
+                type = type.BaseType;
+            }
+        }
+
+        /// <summary>
+        /// Tries to get wireless device IDs from SDK via reflection (e.g. GetWirelessDeviceList, EnumerateDevices).
+        /// Returns empty list if no such API is found.
+        /// </summary>
+        private static List<string> TryGetWirelessDeviceIdsFromSdk(IProductManager productManager)
+        {
+            var list = new List<string>();
+            try
+            {
+                var type = productManager.GetType();
+                foreach (var method in type.GetMethods())
+                {
+                    if (method.ReturnType == typeof(string[]) || (method.ReturnType.IsGenericType && method.ReturnType.GetGenericTypeDefinition().Name == "IEnumerable`1"))
+                    {
+                        if (method.Name.IndexOf("Wireless", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            method.Name.IndexOf("Device", StringComparison.OrdinalIgnoreCase) >= 0 && method.Name.IndexOf("List", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            var parameters = method.GetParameters();
+                            if (parameters.Length == 0)
+                            {
+                                var ret = method.Invoke(productManager, null);
+                                if (ret is string[] arr)
+                                {
+                                    list.AddRange(arr);
+                                    break;
+                                }
+                                if (ret is System.Collections.IEnumerable enumerable and not string)
+                                {
+                                    foreach (var item in enumerable)
+                                        if (item?.ToString() is string s && !string.IsNullOrEmpty(s))
+                                            list.Add(s);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { /* ignore */ }
+            return list;
+        }
+
+        /// <summary>
         /// Returns true if the COM port appears to be in use by another process (e.g. access denied, port in use).
         /// </summary>
         private static bool IsComPortInUse(string portName)
@@ -572,6 +1115,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 Constants.Caa => "Communication Accelerator (CAA)",
                 Constants.Promira => "Promira",
                 Constants.Noahlink => "NOAHlink Wireless",
+                "NOAHlink" => "NOAHlink Wireless",
                 Constants.Rsl10 => "RSL10",
                 _ => interfaceName
             };

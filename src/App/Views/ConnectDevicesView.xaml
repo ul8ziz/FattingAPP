@@ -145,10 +145,11 @@
                         </TextBlock>
                     </StackPanel>
                     
-                    <!-- Scan Button and Cancel Button -->
+                    <!-- Scan Wired / Wireless and Cancel -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="16,0,0,0">
-                        <Button Click="SearchProgrammers_Click"
-                                Margin="0,0,8,0">
+                        <Button Click="SearchWiredProgrammers_Click"
+                                Margin="0,0,8,0"
+                                ToolTip="Scan for wired programmers (e.g. HI-PRO)">
                             <Button.Style>
                                 <Style TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
                                     <Setter Property="IsEnabled" Value="True"/>
@@ -160,50 +161,26 @@
                                 </Style>
                             </Button.Style>
                             <Button.Content>
-                                <StackPanel Orientation="Horizontal">
-                                    <!-- Loading Spinner -->
-                                    <Grid Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center">
-                                        <Ellipse Width="16" Height="16" 
-                                                Stroke="#0D6EFD" 
-                                                StrokeThickness="2"
-                                                StrokeDashArray="3 2"
-                                                Opacity="0.3"/>
-                                        <Ellipse Width="16" Height="16" 
-                                                Stroke="#0D6EFD" 
-                                                StrokeThickness="2"
-                                                StrokeDashArray="3 2"
-                                                StrokeDashOffset="6">
-                                            <Ellipse.RenderTransform>
-                                                <RotateTransform CenterX="8" CenterY="8"/>
-                                            </Ellipse.RenderTransform>
-                                            <Ellipse.Style>
-                                                <Style TargetType="Ellipse">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsSearching}" Value="True">
-                                                            <Setter Property="Visibility" Value="Visible"/>
-                                                            <DataTrigger.EnterActions>
-                                                                <BeginStoryboard x:Name="SpinnerRotationStoryboard">
-                                                                    <Storyboard RepeatBehavior="Forever">
-                                                                        <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
-                                                                                         From="0" To="360" Duration="0:0:1"/>
-                                                                    </Storyboard>
-                                                                </BeginStoryboard>
-                                                            </DataTrigger.EnterActions>
-                                                            <DataTrigger.ExitActions>
-                                                                <StopStoryboard BeginStoryboardName="SpinnerRotationStoryboard"/>
-                                                            </DataTrigger.ExitActions>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Ellipse.Style>
-                                        </Ellipse>
-                                    </Grid>
-                                    <TextBlock Text="Scan for Programmers" VerticalAlignment="Center"/>
-                                </StackPanel>
+                                <TextBlock Text="Scan Wired"/>
                             </Button.Content>
                         </Button>
-                        
+                        <Button Click="SearchWirelessProgrammers_Click"
+                                Margin="0,0,8,0"
+                                ToolTip="Scan for wireless programmers (e.g. NOAHlink, RSL10)">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
+                                    <Setter Property="IsEnabled" Value="True"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSearching}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <Button.Content>
+                                <TextBlock Text="Scan Wireless"/>
+                            </Button.Content>
+                        </Button>
                         <!-- Cancel Button -->
                         <Button Click="CancelSearch_Click"
                                 IsEnabled="{Binding CanCancelSearch}">

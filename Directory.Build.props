@@ -1,6 +1,11 @@
 <Project>
   <PropertyGroup>
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>true</Prefer32Bit>
     <NoWarn>$(NoWarn);1705</NoWarn>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12.0</LangVersion>
   </PropertyGroup>
 </Project>

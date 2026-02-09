@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -122,6 +123,45 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         }
 
         /// <summary>
+        /// Validates that required native DLLs and environment are present. Call before any SDLib usage.
+        /// Throws with a clear message if something is missing.
+        /// </summary>
+        public static void ValidateEnvironment()
+        {
+            var errors = new List<string>();
+
+            if (!Directory.Exists(HiProDriverPath))
+                errors.Add($"HI-PRO driver path not found: {HiProDriverPath}");
+
+            var configPath = GetConfigPath();
+            if (!File.Exists(configPath))
+                errors.Add($"sd.config not found: {configPath}");
+
+            var libraryPath = GetLibraryPath();
+            if (!File.Exists(libraryPath))
+                errors.Add($"Library file not found: {libraryPath}");
+
+            var ctkPath = FindCtkPath();
+            if (ctkPath == null)
+                errors.Add("CTK Runtime not installed. Required for HI-PRO.");
+            else
+            {
+                var commPath = Path.Combine(ctkPath, "communication_modules");
+                if (!Directory.Exists(commPath))
+                    errors.Add($"CTK communication_modules not found: {commPath}");
+                else
+                {
+                    var hiProDll = Path.Combine(commPath, "HI-PRO.dll");
+                    if (!File.Exists(hiProDll))
+                        errors.Add($"HI-PRO.dll not found in CTK: {hiProDll}");
+                }
+            }
+
+            if (errors.Count > 0)
+                throw new InvalidOperationException("SDK environment validation failed:\n" + string.Join("\n", errors));
+        }
+
+        /// <summary>
         /// Sets up SDK environment:
         /// 0. Add HI-PRO directory to DLL search path (helps SDK resolve HI-PRO module)
         /// 1. SD_CONFIG_PATH for sd.config
@@ -130,6 +170,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         /// </summary>
         public static void SetupEnvironment()
         {
+            ValidateEnvironment();
+
             // 0. Add HI-PRO to DLL search path so SDK can load HI-PRO module (e.g. HiProWrapper and dependencies)
             if (Directory.Exists(HiProDriverPath))
             {

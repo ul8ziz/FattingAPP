@@ -5,14 +5,17 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Ul8ziz.FittingApp.Device.DeviceCommunication;
 using Ul8ziz.FittingApp.Device.DeviceCommunication.Models;
+using Ul8ziz.FittingApp.App.Helpers;
 
 namespace Ul8ziz.FittingApp.App.Views
 {
@@ -69,10 +72,12 @@ namespace Ul8ziz.FittingApp.App.Views
             try
             {
                 System.Diagnostics.Debug.WriteLine("=== Initializing SDK services ===");
+                System.Diagnostics.Debug.WriteLine($"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
+                System.Diagnostics.Debug.WriteLine($"Environment.Version: {Environment.Version}");
+                System.Diagnostics.Debug.WriteLine($"AppContext.TargetFrameworkName: {AppContext.TargetFrameworkName}");
                 System.Diagnostics.Debug.WriteLine($"App Base Dir: {AppDomain.CurrentDomain.BaseDirectory}");
                 System.Diagnostics.Debug.WriteLine($"Library Path: {SdkConfiguration.GetLibraryPath()}");
                 System.Diagnostics.Debug.WriteLine($"Config Path: {SdkConfiguration.GetConfigPath()}");
-                System.Diagnostics.Debug.WriteLine($"App Base Dir: {AppDomain.CurrentDomain.BaseDirectory}");
                 
                 _sdkManager = new SdkManager();
                 _sdkManager.Initialize();
@@ -239,63 +244,68 @@ namespace Ul8ziz.FittingApp.App.Views
             set { _isConnected = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanConnect)); }
         }
 
+        private enum ScanKind { Wired, Wireless }
+
         // Event Handlers
-        private async void SearchProgrammers_Click(object sender, RoutedEventArgs e)
+        private void SearchWiredProgrammers_Click(object sender, RoutedEventArgs e) => RunScanAsync(ScanKind.Wired);
+        private void SearchWirelessProgrammers_Click(object sender, RoutedEventArgs e) => RunScanAsync(ScanKind.Wireless);
+
+        private async void RunScanAsync(ScanKind kind)
         {
-            System.Diagnostics.Debug.WriteLine("=== SearchProgrammers_Click STARTED ===");
-            
-            // Cancel any previous scan
+            System.Diagnostics.Debug.WriteLine($"=== RunScanAsync ({kind}) STARTED ===");
+
             _cancellationTokenSource?.Cancel();
             _cancellationTokenSource?.Dispose();
             _cancellationTokenSource = new CancellationTokenSource();
 
-            // Update UI immediately (we're already on the UI thread)
             IsSearching = true;
             HasFoundProgrammers = false;
             ScanCompleted = false;
-            FoundProgrammersMessage = "Searching for programmers...";
+            FoundProgrammersMessage = kind == ScanKind.Wired ? "Searching for wired programmers..." : "Searching for wireless programmers...";
             Programmers.Clear();
             _timeoutSecondsRemaining = ScanTimeoutSeconds;
             StartTimeoutTimer();
 
             try
             {
-                // Ensure SDK is initialized (lazy)
-                if (_sdkManager == null || !_sdkManager.IsInitialized)
+                var progress = new Progress<int>(p => { FoundProgrammersMessage = $"Scanning... {p}%"; });
+                var token = _cancellationTokenSource.Token;
+
+                ProgrammerScanner.ScanResult scanResult;
+                if (kind == ScanKind.Wired)
                 {
-                    FoundProgrammersMessage = "Initializing SDK...";
-                    System.Diagnostics.Debug.WriteLine("Initializing SDK...");
-                    InitializeSdkServices();
-                    
+                    // All CTK/sdnet calls for wired scan on one dedicated STA thread; use fresh SDK on that thread to avoid E_INVALID_STATE
+                    FoundProgrammersMessage = "Scanning wired (STA)...";
+                    await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                    scanResult = StaThreadHelper.RunOnStaThread(() =>
+                    {
+                        SdkConfiguration.SetupEnvironment();
+                        using var sdk = new SdkManager();
+                        sdk.Initialize();
+                        var scanner = new ProgrammerScanner(sdk);
+                        return scanner.ScanWiredOnlySync(progress, token, null);
+                    });
+                }
+                else
+                {
                     if (_sdkManager == null || !_sdkManager.IsInitialized)
                     {
-                        var detail = _lastSdkError ?? "Unknown error";
-                        throw new InvalidOperationException($"SDK initialization failed.\n\n{detail}");
+                        FoundProgrammersMessage = "Initializing SDK...";
+                        System.Diagnostics.Debug.WriteLine("Initializing SDK...");
+                        InitializeSdkServices();
+                        if (_sdkManager == null || !_sdkManager.IsInitialized)
+                        {
+                            var detail = _lastSdkError ?? "Unknown error";
+                            throw new InvalidOperationException($"SDK initialization failed.\n\n{detail}");
+                        }
                     }
-                    System.Diagnostics.Debug.WriteLine("SDK initialized successfully");
+                    if (_programmerScanner == null)
+                        throw new InvalidOperationException("Programmer scanner not available.");
+                    FoundProgrammersMessage = "Scanning wireless...";
+                    await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                    scanResult = _programmerScanner.ScanWirelessOnlySync(progress, token, YieldToUI);
                 }
 
-                if (_programmerScanner == null)
-                    throw new InvalidOperationException("Programmer scanner not available.");
-
-                FoundProgrammersMessage = "Scanning for programmers...";
-
-                System.Diagnostics.Debug.WriteLine("Starting scan for programmers...");
-
-                var progress = new Progress<int>(p =>
-                {
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-                        FoundProgrammersMessage = $"Scanning... {p}%";
-                    });
-                });
-
-                // Scan for all programmers (returns detailed result)
-                var scanResult = await _programmerScanner.ScanAllProgrammersAsync(
-                    progress,
-                    _cancellationTokenSource.Token);
-
-                // After await, we're back on the UI thread
                 StopTimeoutTimer();
 
                 var foundProgrammers = scanResult.FoundProgrammers;
@@ -345,9 +355,10 @@ namespace Ul8ziz.FittingApp.App.Views
                 }
                 else
                 {
-                    FoundProgrammersMessage = "No programmers found. Connect a programmer and try again.";
+                    FoundProgrammersMessage = kind == ScanKind.Wired
+                        ? "No wired programmers found. Connect HI-PRO and try again."
+                        : "No wireless programmers found. Turn on Bluetooth and try again.";
 
-                    // Build detailed diagnostic message with full error details
                     var diagnostics = scanResult.GetDiagnosticSummary();
                     var fullDetail = scanResult.GetFullDiagnosticDetail();
                     var hasHiproUnknownName = scanResult.AllAttempts.Any(a =>
@@ -356,34 +367,34 @@ namespace Ul8ziz.FittingApp.App.Views
                     var hasHiproNotConnected = scanResult.AllAttempts.Any(a =>
                         string.Equals(a.ErrorCode, "NOT_CONNECTED", StringComparison.OrdinalIgnoreCase) &&
                         (a.ProgrammerName?.Contains("HI-PRO", StringComparison.OrdinalIgnoreCase) ?? false));
-
-                    // Check if CTK is installed (required for wired programmers)
                     var ctkInstalled = SdkConfiguration.IsCtkInstalled();
 
-                    var pleaseCheck = "Please check:\n" +
-                        "• Programmer (HI-PRO / CAA) is connected via USB\n" +
-                        "• The programmer is powered on\n" +
-                        "• Correct drivers are installed";
-                    if (!ctkInstalled)
-                        pleaseCheck += "\n• CTK Runtime: Install CTKRuntime64.msi from SDK redistribution folder (required for wired programmers: CAA, HI-PRO, Promira)";
-                    if (hasHiproUnknownName)
-                        pleaseCheck += "\n• HI-PRO: Ensure HI-PRO driver (v4.02+) is installed and that \"C:\\Program Files (x86)\\HI-PRO\" is in the system PATH (not just user PATH); restart the app after changing PATH.";
-                    if (hasHiproNotConnected && fullDetail.Contains("E_INVALID_STATE", StringComparison.OrdinalIgnoreCase))
-                        pleaseCheck += "\n• HI-PRO (E_INVALID_STATE): Close any other app using HI-PRO (e.g. Starkey Inspire, HI-PRO Configuration). Ensure HI-PRO is on COM1–COM4 (Device Manager → Ports → HI-PRO → Advanced). Restart this app and try again.";
+                    var pleaseCheck = kind == ScanKind.Wired
+                        ? "Please check:\n• HI-PRO programmer is connected via USB\n• The programmer is powered on\n• Correct drivers are installed"
+                        : "Please check:\n• Bluetooth is on, NOAHlink/RSL10 in range and paired";
+                    if (kind == ScanKind.Wired)
+                    {
+                        if (!ctkInstalled)
+                            pleaseCheck += "\n• CTK Runtime: Install CTKRuntime64.msi from SDK redistribution folder (required for HI-PRO)";
+                        if (hasHiproUnknownName)
+                            pleaseCheck += "\n• HI-PRO: Ensure HI-PRO driver (v4.02+) is installed and \"C:\\Program Files (x86)\\HI-PRO\" is in system PATH; restart the app after changing PATH.";
+                        if (fullDetail.Contains("E_INVALID_STATE", StringComparison.OrdinalIgnoreCase))
+                            pleaseCheck += "\n• HI-PRO (E_INVALID_STATE): Another process is likely using the programmer (e.g. HiProMonitorService, Starkey Inspire). Close them: run \"powershell -ExecutionPolicy Bypass -File scripts\\close-programmer-apps.ps1 -Close\" from the project folder, confirm with Y, then restart this app and click Scan Wired again.";
+                    }
 
                     System.Diagnostics.Debug.WriteLine("=== FULL SCAN DIAGNOSTIC ===");
                     System.Diagnostics.Debug.WriteLine(fullDetail);
                     System.Diagnostics.Debug.WriteLine("=== END DIAGNOSTIC ===");
 
+                    var title = kind == ScanKind.Wired ? "No Wired Programmers Found" : "No Wireless Programmers Found";
                     MessageBox.Show(
-                        $"No programmers were detected.\n\nScan Results:\n{diagnostics}\n\n" +
-                        $"Technical Details:\n{fullDetail}\n\n" + pleaseCheck,
-                        "No Programmers Found",
+                        $"No {(kind == ScanKind.Wired ? "wired" : "wireless")} programmers were detected.\n\nScan Results:\n{diagnostics}\n\nTechnical Details:\n{fullDetail}\n\n{pleaseCheck}",
+                        title,
                         MessageBoxButton.OK,
                         MessageBoxImage.Warning);
                 }
-                
-                System.Diagnostics.Debug.WriteLine("=== SearchProgrammers_Click completed successfully ===");
+
+                System.Diagnostics.Debug.WriteLine($"=== RunScanAsync ({kind}) completed successfully ===");
             }
             catch (OperationCanceledException)
             {
@@ -392,8 +403,14 @@ namespace Ul8ziz.FittingApp.App.Views
                 IsSearching = false;
                 ScanCompleted = true;
                 HasFoundProgrammers = false;
-                OnPropertyChanged(nameof(ScanFoundNothing));
                 FoundProgrammersMessage = "Scan cancelled by user";
+                OnPropertyChanged(nameof(IsSearching));
+                OnPropertyChanged(nameof(ScanCompleted));
+                OnPropertyChanged(nameof(HasFoundProgrammers));
+                OnPropertyChanged(nameof(ScanFoundNothing));
+                OnPropertyChanged(nameof(FoundProgrammersMessage));
+                OnPropertyChanged(nameof(CanCancelSearch));
+                OnPropertyChanged(nameof(TimeoutMessage));
             }
             catch (Exception ex)
             {
@@ -764,6 +781,18 @@ namespace Ul8ziz.FittingApp.App.Views
                     });
                 }
             }
+        }
+
+        /// <summary>
+        /// Pumps the dispatcher so pending UI messages (e.g. Cancel button click) are processed during the synchronous scan.
+        /// </summary>
+        private static void YieldToUI()
+        {
+            var frame = new DispatcherFrame();
+            Application.Current.Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
         }
 
         // Cancel search handler
