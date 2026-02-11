@@ -15,7 +15,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
     {
         private readonly SdkManager _sdkManager;
 
-        /// <summary>Ensures only one scan runs at a time (CTK/SDNET are not thread-safe).</summary>
+        // C) Guard scan with SemaphoreSlim(1,1). All CTK/sdnet calls run on one dedicated STA thread (StaThreadHelper); no Task.Run/ThreadPool in scan path.
         private static readonly SemaphoreSlim _scanLock = new SemaphoreSlim(1, 1);
 
         // Supported wired programmer names (must match sd.config interface_name).
@@ -352,7 +352,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 {
                     attempt.Found = false;
                     attempt.ErrorMessage = ex.Message;
-
+                    if (ScanDiagnostics.IsSdException(ex))
+                        ScanDiagnostics.LogSdExceptionDetails(productManager, ex);
                     // Log FULL error details
                     Debug.WriteLine($"  -> EXCEPTION for {programmerName}:");
                     Debug.WriteLine($"     Type: {ex.GetType().FullName}");
@@ -498,6 +499,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             catch (Exception ex)
             {
                 Debug.WriteLine($"Error during scan: {ex.Message}");
+                if (ScanDiagnostics.IsSdException(ex))
+                    ScanDiagnostics.LogSdExceptionDetails(_sdkManager?.ProductManager, ex);
                 progress?.Report(100);
                 return new ScanResult();
             }
@@ -546,6 +549,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             try
             {
                 Debug.WriteLine("[ScanWiredOnlySync] Starting wired-only scan.");
+                Console.WriteLine("=== SCAN_PATCH_MARKER_888 ===");
                 var result = new ScanResult();
                 ScanForWiredProgrammersSyncCore(result, progress, cancellationToken, yieldToUI);
                 progress?.Report(100);
@@ -595,8 +599,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         {
             var productManager = _sdkManager.ProductManager;
 
+            // CTK interface dump already done in SdkManager.Initialize() right after "SDK initialized successfully"
             ScanDiagnostics.WriteStartupAndScanPreamble();
-            ScanDiagnostics.WriteSdkInterfaceList(productManager);
             LogEnvironmentDiagnostics();
             Thread.Sleep(400);
             progress?.Report(5);
@@ -643,7 +647,13 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     attempt.Found = false;
                     attempt.ErrorMessage = ex.Message;
                     Debug.WriteLine($"[Scan] EXCEPTION for {programmerName}: {ex.GetType().Name}: {ex.Message}");
-                    var fullMsg = ex.ToString();
+                    if (ScanDiagnostics.IsSdException(ex))
+                    {
+                        Console.WriteLine("SD_EXCEPTION: " + ex.Message);
+                        Console.WriteLine(ex.ToString());
+                        ScanDiagnostics.LogSdExceptionDetails(productManager, ex);
+                    }
+                    var fullMsg = ex.ToString() ?? "";
                     if (fullMsg.Contains("E_UNKNOWN_NAME")) attempt.ErrorCode = "E_UNKNOWN_NAME";
                     else if (fullMsg.Contains("E_INVALID_STATE")) attempt.ErrorCode = "E_INVALID_STATE";
                     else if (fullMsg.Contains("E_NOT_FOUND")) attempt.ErrorCode = "E_NOT_FOUND";
@@ -660,7 +670,22 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         }
 
         /// <summary>
-        /// Strategy A: SDK communication interface enumeration. Strategy B: WMI HI-PRO COM port only.
+        /// Returns the CTK communication interface list (same order as DumpCtkInterfaces). Used for Strategy A.
+        /// </summary>
+        private static List<string> GetCtkInterfaceList(IProductManager productManager)
+        {
+            var list = new List<string>();
+            int count = SdkScanHelper.GetCommunicationInterfaceCount(productManager);
+            for (int i = 0; i < count; i++)
+            {
+                var s = SdkScanHelper.GetCommunicationInterfaceString(productManager, i);
+                if (!string.IsNullOrEmpty(s)) list.Add(s);
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Strategy A: CTK interface strings (HI-PRO filtered if present). Strategy B: COM2-only fallback.
         /// One attempt at a time; TryCheckDevice does create/check/close. No concurrent CTK calls.
         /// </summary>
         private void HiproScanStrategyAThenB(
@@ -674,11 +699,17 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             Thread.Sleep(300);
             yieldToUI?.Invoke();
 
-            // Strategy A: SDK interface list (prefer HI-PRO / VID_0C33 PID_0012)
-            var interfaces = SdkScanHelper.GetSdkCommunicationInterfaces(productManager);
+            // 4) Module dump right before attempting HI-PRO scan
+            ScanDiagnostics.DumpLoadedModules(new[] { "ftd2xx.dll", "FTChipID.dll", "HI-PRO.dll", "HiProWrapper.dll", "sdnet.dll" });
+
+            // Strategy A: CTK interface strings. If any contains "HI-PRO", try only those; else try all. Log CTK errors after each failure.
+            var rawInterfaces = GetCtkInterfaceList(productManager);
+            var interfaces = rawInterfaces.Count > 0 && rawInterfaces.Any(s => s.IndexOf("HI-PRO", StringComparison.OrdinalIgnoreCase) >= 0)
+                ? rawInterfaces.Where(s => s.IndexOf("HI-PRO", StringComparison.OrdinalIgnoreCase) >= 0).ToList()
+                : rawInterfaces;
             if (interfaces.Count > 0)
             {
-                Debug.WriteLine($"[Scan] HI-PRO Strategy A: trying {interfaces.Count} SDK interface(s)");
+                ScanDiagnostics.WriteLine($"[Scan] HI-PRO Strategy A: trying {interfaces.Count} SDK interface(s)");
                 foreach (var ifStr in interfaces)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -688,45 +719,56 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                         attempt.Found = true;
                         var portLabel = ifStr.IndexOf("COM", StringComparison.OrdinalIgnoreCase) >= 0 ? ifStr : "USB";
                         result.FoundProgrammers.Add(CreateProgrammerInfo(result.FoundProgrammers.Count + 1, attempt.DisplayName, programmerName, portLabel));
-                        Debug.WriteLine($"[Scan] CONFIRMED: HI-PRO via SDK interface: {ifStr}");
+                        ScanDiagnostics.WriteLine($"[Scan] CONFIRMED: HI-PRO via SDK interface: {ifStr}");
                         return;
                     }
-                    Debug.WriteLine($"[Scan] HI-PRO interface '{ifStr}': {err}");
+                    ScanDiagnostics.WriteLine($"[Scan] HI-PRO interface '{ifStr}': {err}");
+                    ScanDiagnostics.LogCtkErrors(productManager);
                     Thread.Sleep(80);
                 }
             }
 
-            // Strategy B: WMI-detected HI-PRO COM port only (e.g. COM2); never COM3/COM4 unless matched by VID/PID
+            // Strategy B: COM2 legacy only. Try "COM2", "COM2:", "\\\\.\\COM2", then port=COM2, port=2. Never COM3/COM4. Log CTK errors after each failure.
+            const string com2Fallback = "COM2";
+            var com2Variants = new List<string> { "COM2", "COM2:", "\\\\.\\COM2" };
             var hiproCom = HiproWmiHelper.GetHiproComPortFromWmi("0C33", "0012");
-            if (!string.IsNullOrEmpty(hiproCom))
+            if (!string.IsNullOrEmpty(hiproCom) && string.Equals(hiproCom, com2Fallback, StringComparison.OrdinalIgnoreCase))
             {
                 int portNum = ParseComNumber(hiproCom);
-                var settingsToTry = new List<string> { $"port={hiproCom}" };
-                if (portNum > 0) settingsToTry.Add($"port={portNum}");
-                Debug.WriteLine($"[Scan] HI-PRO Strategy B: trying WMI port {hiproCom} only");
-                foreach (var settings in settingsToTry)
+                com2Variants.Add($"port={hiproCom}");
+                if (portNum > 0) com2Variants.Add($"port={portNum}");
+            }
+            else if (string.IsNullOrEmpty(hiproCom))
+            {
+                com2Variants.Add("port=COM2");
+                com2Variants.Add("port=2");
+            }
+            ScanDiagnostics.WriteLine($"[Scan] HI-PRO Strategy B: trying COM2 only, {com2Variants.Count} variant(s)");
+            foreach (var settings in com2Variants)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yieldToUI?.Invoke();
+                if (SdkScanHelper.TryCheckDevice(productManager, programmerName, settings, out var err))
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    yieldToUI?.Invoke();
-                    if (SdkScanHelper.TryCheckDevice(productManager, programmerName, settings, out var err))
-                    {
-                        attempt.Found = true;
-                        result.FoundProgrammers.Add(CreateProgrammerInfo(result.FoundProgrammers.Count + 1, attempt.DisplayName, programmerName, hiproCom));
-                        Debug.WriteLine($"[Scan] CONFIRMED: HI-PRO on {hiproCom}");
-                        return;
-                    }
-                    if (IsPortInUseExceptionFromMessage(err) && !attempt.ComPortsInUse.Contains(hiproCom))
-                        attempt.ComPortsInUse.Add(hiproCom);
-                    Thread.Sleep(80);
+                    attempt.Found = true;
+                    result.FoundProgrammers.Add(CreateProgrammerInfo(result.FoundProgrammers.Count + 1, attempt.DisplayName, programmerName, com2Fallback));
+                    ScanDiagnostics.WriteLine($"[Scan] CONFIRMED: HI-PRO on COM2 via '{settings}'");
+                    return;
                 }
+                ScanDiagnostics.WriteLine($"[Scan] COM2 variant '{settings}': {err}");
+                ScanDiagnostics.LogCtkErrors(productManager);
+                if (IsPortInUseExceptionFromMessage(err))
+                    attempt.ComPortsInUse.Add(com2Fallback);
+                Thread.Sleep(80);
             }
 
             attempt.ErrorCode = "NOT_CONNECTED";
             attempt.ErrorMessage = interfaces.Count > 0
-                ? "Interface enumeration and WMI fallback did not detect HI-PRO"
-                : (hiproCom == null ? "No HI-PRO COM port found via WMI (VID_0C33 PID_0012)" : "WMI HI-PRO port tried but not detected");
-            attempt.HiproComPortsTriedCount = hiproCom != null ? 1 : 0;
-            Debug.WriteLine($"[Scan] HI-PRO NOT CONNECTED");
+                ? "Interface enumeration and COM2 fallback did not detect HI-PRO"
+                : (rawInterfaces.Count == 0 ? "No CTK communication interfaces; COM2 fallback tried" : "COM2 fallback tried but not detected");
+            attempt.HiproComPortsTriedCount = 1;
+            ScanDiagnostics.WriteLine("[Scan] HI-PRO NOT CONNECTED");
+            // Success criteria: If CTK_IF_COUNT == 0 => CTK communication modules not properly registered/loaded. If D2XX count > 0 but CTK fails => CTK interface selection/init/STA issue (run HiproD2xxProbe).
         }
 
         private static bool IsPortInUseExceptionFromMessage(string message)

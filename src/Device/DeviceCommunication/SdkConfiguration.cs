@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
 
@@ -11,12 +10,6 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
     [SupportedOSPlatform("windows")]
     public static class SdkConfiguration
     {
-        // Add directories to DLL search path so SDK can load modules
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern bool SetDllDirectory(string lpPathName);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern int AddDllDirectory(string NewDirectory);
 
         // Library file name (from SDK samples Constants.cs)
         public static string LibraryName { get; set; } = "E7160SL.library";
@@ -162,21 +155,37 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         }
 
         /// <summary>
+        /// Sets the app folder as the first DLL search directory so ftd2xx.dll loads from app output (not System32).
+        /// Call at app startup before any SDK/native load. Does not modify system paths.
+        /// </summary>
+        /// <summary>Sets the app folder as the first DLL search directory. Call at startup before any CTK/sdnet.</summary>
+        public static void SetAppDllDirectoryFirst()
+        {
+            var appDir = AppDomain.CurrentDomain.BaseDirectory ?? "";
+            if (string.IsNullOrEmpty(appDir) || !Directory.Exists(appDir)) return;
+            if (NativeDllResolver.SetDllDirectoryPath(appDir))
+                Debug.WriteLine($"SetDllDirectory(app) set at startup: {appDir}");
+            else
+                Debug.WriteLine($"WARNING: SetDllDirectory(app) failed: {appDir}");
+        }
+
+        /// <summary>
         /// Sets up SDK environment:
-        /// 0. Add HI-PRO directory to DLL search path (helps SDK resolve HI-PRO module)
+        /// 0. SetDllDirectory(HI-PRO) FIRST so ftd2xx.dll loads from HI-PRO before CTK.
         /// 1. SD_CONFIG_PATH for sd.config
-        /// 2. Adds HI-PRO driver path to PATH (required by SDK for HI-PRO support)
-        /// 3. Adds CTK path if available
+        /// 2. Replace process PATH with strict order: AppBaseDir; HI-PRO; CTK; CTK\communication_modules (avoids ftd2xx conflicts).
         /// </summary>
         public static void SetupEnvironment()
         {
             ValidateEnvironment();
 
-            // 0. Add HI-PRO to DLL search path so SDK can load HI-PRO module (e.g. HiProWrapper and dependencies)
+            var appDir = AppDomain.CurrentDomain.BaseDirectory ?? "";
+
+            // 0. SetDllDirectory HI-PRO before any CTK usage so loader finds ftd2xx from HI-PRO first (switch for scan; restore after via HiproPreflight.RestoreAppDllDirectoryAfterScan)
             if (Directory.Exists(HiProDriverPath))
             {
-                if (SetDllDirectory(HiProDriverPath))
-                    Debug.WriteLine($"SetDllDirectory added HI-PRO: {HiProDriverPath}");
+                if (NativeDllResolver.SetDllDirectoryPath(HiProDriverPath))
+                    Debug.WriteLine($"SetDllDirectory(HI-PRO) set first: {HiProDriverPath}");
                 else
                     Debug.WriteLine($"WARNING: SetDllDirectory failed for HI-PRO: {HiProDriverPath}");
             }
@@ -193,51 +202,21 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 Debug.WriteLine($"WARNING: sd.config not found at: {configPath}");
             }
 
-            // 2. Add HI-PRO driver path to PATH (SDK Readme requirement)
-            // The SDK dynamically loads the HI-PRO module from this path
-            AddToPath(HiProDriverPath, "HI-PRO");
-
-            // 3. Add CTK path if installed (required for wired programmers)
-            // CTK can be installed in multiple locations depending on version
-            // App runs as x86 (32-bit) so we use the 32-bit communication_modules (root, not x64bit)
+            // 2. Replace PATH with strict order: AppBaseDir, HI-PRO, CTK, CTK\communication_modules (no other folders to avoid ftd2xx conflicts)
             var ctkPath = FindCtkPath();
-            if (ctkPath != null)
+            var parts = new List<string> { appDir.TrimEnd('\\', '/'), HiProDriverPath };
+            if (!string.IsNullOrEmpty(ctkPath) && Directory.Exists(ctkPath))
             {
-                AddToPath(ctkPath, "CTK");
-                // Add 32-bit communication_modules subfolder (contains HI-PRO.dll, caa.dll, etc.)
+                parts.Add(ctkPath);
                 var commModules = Path.Combine(ctkPath, "communication_modules");
                 if (Directory.Exists(commModules))
-                    AddToPath(commModules, "CTK-comm-modules");
+                    parts.Add(commModules);
             }
-            else
-            {
-                Debug.WriteLine("WARNING: CTK Runtime not found. Required for wired programmers (CAA, HI-PRO, Promira).");
-            }
-
-            // 4. Add app directory to PATH (so SDK can find its own DLLs)
-            var appDir = AppDomain.CurrentDomain.BaseDirectory;
-            AddToPath(appDir, "AppDir");
+            var newPath = string.Join(";", parts);
+            Environment.SetEnvironmentVariable("PATH", newPath);
+            Debug.WriteLine($"PATH set (HI-PRO before CTK): {newPath}");
+            ScanDiagnostics.WriteLine($"PATH (process): {newPath}");
         }
 
-        private static void AddToPath(string directory, string label)
-        {
-            if (Directory.Exists(directory))
-            {
-                var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-                if (!currentPath.Contains(directory, StringComparison.OrdinalIgnoreCase))
-                {
-                    Environment.SetEnvironmentVariable("PATH", directory + ";" + currentPath);
-                    Debug.WriteLine($"Added {label} to PATH: {directory}");
-                }
-                else
-                {
-                    Debug.WriteLine($"{label} already in PATH: {directory}");
-                }
-            }
-            else
-            {
-                Debug.WriteLine($"WARNING: {label} path not found: {directory}");
-            }
-        }
     }
 }

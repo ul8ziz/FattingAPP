@@ -91,11 +91,15 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
 
                 _isInitialized = true;
                 Debug.WriteLine("SDK initialized successfully");
+                // A) CTK interface dump BEFORE any HI-PRO attempt (exact format: CTK_IF_COUNT, CTK_IF[i])
+                ScanDiagnostics.DumpCtkInterfaces(_productManager);
             }
             catch (Exception ex)
             {
                 _isInitialized = false;
                 Debug.WriteLine($"SDK initialization failed: {ex.Message}");
+                if (ScanDiagnostics.IsSdException(ex))
+                    ScanDiagnostics.LogSdExceptionDetails(_productManager, ex);
                 throw new InvalidOperationException($"Failed to initialize SDK: {ex.Message}", ex);
             }
         }

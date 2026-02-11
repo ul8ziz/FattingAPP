@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using Ul8ziz.FittingApp.App.Services;
 
 namespace Ul8ziz.FittingApp.App.Views
 {
@@ -19,20 +20,14 @@ namespace Ul8ziz.FittingApp.App.Views
         public MainView()
         {
             InitializeComponent();
-            
-            // Create ViewModel
             _viewModel = new MainViewModel
             {
                 HasActiveSession = false,
                 HasUnsavedChanges = false,
-                ConnectionStatusText = "Not Connected",
-                ConnectionStatusBrush = new SolidColorBrush(Colors.Gray),
                 UserName = "Dr. Sarah Johnson",
                 UserRole = "Licensed Audiologist",
-                IsDeviceReady = false,
                 CurrentView = CreateWelcomeView()
             };
-            
             this.DataContext = _viewModel;
         }
         
@@ -66,21 +61,45 @@ namespace Ul8ziz.FittingApp.App.Views
         {
             NavigateToConnectDevices();
         }
+
+        private void DiagnosticsButton_Click(object sender, RoutedEventArgs e)
+        {
+            bool ran = Helpers.DiagnosticRunner.RunDiagnostics(AppDomain.CurrentDomain.BaseDirectory, autoStopStarkeyInspire: false, reportToLogsDiagnostics: true);
+            if (ran)
+            {
+                MessageBox.Show(
+                    "Diagnostics completed. Reports saved to:\n\n• docs\\HI-PRO_Diagnostic_Report.md\n• docs\\reports\\HI-PRO_Report_*.md\n• logs\\diagnostics\\HI-PRO_DiagnosticReport.md\n• logs\\diagnostics\\*.json",
+                    "HI-PRO Diagnostics",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            else
+            {
+                MessageBox.Show(
+                    "Diagnostic scripts were not found. Run the app from the repository root (or ensure scripts\\diagnostics\\05_summary_runner.ps1 exists).",
+                    "HI-PRO Diagnostics",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
     }
     
-    // Simple ViewModel for MainView
+    // ViewModel for MainView; connection state comes from AppSessionState
     public class MainViewModel : INotifyPropertyChanged
     {
         private bool _hasActiveSession;
         private bool _hasUnsavedChanges;
-        private string _connectionStatusText = string.Empty;
-        private SolidColorBrush? _connectionStatusBrush;
         private string _userName = string.Empty;
         private string _userRole = string.Empty;
-        private bool _isDeviceReady;
         private UserControl? _currentView;
         private ICommand? _endSessionCommand;
         private ICommand? _navigateCommand;
+
+        public MainViewModel()
+        {
+            var session = AppSessionState.Instance;
+            session.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName);
+        }
 
         public bool HasActiveSession
         {
@@ -94,17 +113,11 @@ namespace Ul8ziz.FittingApp.App.Views
             set { _hasUnsavedChanges = value; OnPropertyChanged(); }
         }
 
-        public string ConnectionStatusText
-        {
-            get => _connectionStatusText;
-            set { _connectionStatusText = value; OnPropertyChanged(); }
-        }
-
-        public SolidColorBrush? ConnectionStatusBrush
-        {
-            get => _connectionStatusBrush;
-            set { _connectionStatusBrush = value; OnPropertyChanged(); }
-        }
+        public string ConnectionStatusText => AppSessionState.Instance.ConnectionStatusText;
+        public SolidColorBrush? ConnectionStatusBrush => AppSessionState.Instance.ConnectionStatusBrush as SolidColorBrush;
+        public string ConnectedDeviceDisplayName => AppSessionState.Instance.ConnectedDeviceDisplayName;
+        public bool IsConnectedDeviceNameVisible => AppSessionState.Instance.IsConnectedDeviceNameVisible;
+        public bool IsNavigationEnabled => AppSessionState.Instance.IsNavigationEnabled;
 
         public string UserName
         {
@@ -116,12 +129,6 @@ namespace Ul8ziz.FittingApp.App.Views
         {
             get => _userRole;
             set { _userRole = value; OnPropertyChanged(); }
-        }
-
-        public bool IsDeviceReady
-        {
-            get => _isDeviceReady;
-            set { _isDeviceReady = value; OnPropertyChanged(); }
         }
 
         public UserControl? CurrentView
@@ -154,7 +161,7 @@ namespace Ul8ziz.FittingApp.App.Views
         {
             HasActiveSession = false;
             HasUnsavedChanges = false;
-            IsDeviceReady = false;
+            AppSessionState.Instance.SetNotConnected();
             CurrentView = CreateWelcomeView();
         }
 
@@ -176,7 +183,8 @@ namespace Ul8ziz.FittingApp.App.Views
 
         private void Navigate(string viewName)
         {
-            // Handle navigation to different views
+            if (!AppSessionState.Instance.IsNavigationEnabled && viewName != "ConnectDevices")
+                return;
             UserControl? newView = viewName switch
             {
                 "ConnectDevices" => new ConnectDevicesView(),

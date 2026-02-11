@@ -170,6 +170,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             }
             catch (Exception ex)
             {
+                if (ScanDiagnostics.IsSdException(ex))
+                    ScanDiagnostics.LogSdExceptionDetails(null, ex);
                 CleanupConnection(side, commAdaptor);
                 throw new InvalidOperationException($"Failed to connect to {side} device: {ex.Message}", ex);
             }

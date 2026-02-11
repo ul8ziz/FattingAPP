@@ -347,278 +347,274 @@
                 </StackPanel>
             </Border>
             
-            <!-- Step 3: Discover Hearing Aids -->
+            <!-- Discover & Connect Hearing Aids (merged Step 3 + 4 + Connect) -->
             <Border Style="{StaticResource StepCardStyle}" Margin="0,0,0,24">
                 <StackPanel>
-                    <TextBlock Text="Step 3: Discover Hearing Aids" 
+                    <TextBlock Text="Discover &amp; Connect Hearing Aids" 
                                Style="{StaticResource Heading3Style}"
-                               Margin="0,0,0,8"/>
-                    <TextBlock Text="Place hearing aids near the programmer" 
-                               Style="{StaticResource BodyTextStyle}"
-                               Foreground="{StaticResource TextSecondaryBrush}"
                                Margin="0,0,0,16"/>
                     
-                    <Button Click="DiscoverDevices_Click"
-                            IsEnabled="{Binding CanDiscover}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MinWidth="280"/>
+                            <ColumnDefinition Width="24"/>
+                            <ColumnDefinition Width="*" MinWidth="280"/>
+                        </Grid.ColumnDefinitions>
+                        
+                        <!-- LEFT COLUMN: Discovery controls + status -->
+                        <StackPanel Grid.Column="0">
+                            <Button Click="DiscoverDevices_Click"
+                                    IsEnabled="{Binding CanDiscover}">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsDiscovering}" Value="True">
+                                                <Setter Property="IsEnabled" Value="False"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                                <Button.Content>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                        <TextBlock Text="📡" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                        <TextBlock VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="Scan for Hearing Aids"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsDiscovering}" Value="True">
+                                                            <Setter Property="Text" Value="Scanning…"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Click="DiscoverDevices_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Padding="8,4"
+                                        Margin="0,0,8,0">
+                                    <TextBlock Text="Rescan"/>
+                                </Button>
+                                <Button Click="StopDiscovery_Click"
+                                        Padding="8,4">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDiscovering}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                    <TextBlock Text="Stop"/>
+                                </Button>
+                            </StackPanel>
+                            <TextBlock Text="{Binding StatusText}"
+                                       Style="{StaticResource CaptionStyle}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,12,0,0"/>
+                            <ProgressBar Maximum="100"
+                                         Height="8"
+                                         Margin="0,12,0,0"
+                                         IsIndeterminate="True">
+                                <ProgressBar.Style>
+                                    <Style TargetType="ProgressBar" BasedOn="{StaticResource ProgressBarStyle}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsDiscovering}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ProgressBar.Style>
+                            </ProgressBar>
+                        </StackPanel>
+                        
+                        <!-- RIGHT COLUMN: Detected devices list or empty state -->
+                        <Border Grid.Column="2"
+                                Background="{StaticResource Gray50Brush}"
+                                CornerRadius="8"
+                                Padding="16"
+                                MinHeight="180">
+                            <Grid>
+                                <!-- Empty state -->
+                                <StackPanel HorizontalAlignment="Center"
+                                             VerticalAlignment="Center">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasDevices}" Value="False">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <TextBlock Text="🔌"
+                                               FontSize="32"
+                                               Foreground="{StaticResource Gray400Brush}"
+                                               HorizontalAlignment="Center"
+                                               Margin="0,0,0,8"/>
+                                    <TextBlock Text="No devices detected yet."
+                                               FontSize="14"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                               HorizontalAlignment="Center"
+                                               Margin="0,0,0,4"/>
+                                    <TextBlock Text="Place hearing aids on HI-PRO and click Scan."
+                                               Style="{StaticResource CaptionStyle}"
+                                               HorizontalAlignment="Center"
+                                               TextAlignment="Center"/>
+                                </StackPanel>
+                                <!-- Devices list (only detected devices) -->
+                                <ItemsControl ItemsSource="{Binding Devices}">
+                                    <ItemsControl.Style>
+                                        <Style TargetType="ItemsControl">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasDevices}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ItemsControl.Style>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="0,0,0,12"
+                                                Padding="12"
+                                                Background="{StaticResource WhiteBrush}"
+                                                BorderBrush="{StaticResource Gray200Brush}"
+                                                BorderThickness="1"
+                                                CornerRadius="8"
+                                                MouseLeftButtonDown="DeviceCard_MouseLeftButtonDown">
+                                            <StackPanel>
+                                                <CheckBox IsChecked="{Binding IsSelected}"
+                                                          FontSize="14"
+                                                          FontWeight="SemiBold"
+                                                          Margin="0,0,0,8"
+                                                          Checked="DeviceCheckBox_Checked"
+                                                          Unchecked="DeviceCheckBox_Checked">
+                                                    <CheckBox.Content>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Border Background="{StaticResource PrimaryBrush}"
+                                                                    CornerRadius="4"
+                                                                    Padding="4,2"
+                                                                    Margin="0,0,8,0"
+                                                                    VerticalAlignment="Center">
+                                                                <TextBlock Text="{Binding Side}"
+                                                                           FontSize="11"
+                                                                           Foreground="{StaticResource WhiteBrush}"
+                                                                           FontWeight="SemiBold"/>
+                                                            </Border>
+                                                            <TextBlock Text="Select" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </CheckBox.Content>
+                                                </CheckBox>
+                                                <TextBlock Text="{Binding Model}"
+                                                           FontSize="14"
+                                                           FontWeight="SemiBold"
+                                                           Margin="0,0,0,4"/>
+                                                <TextBlock Text="{Binding SerialNumber, StringFormat='Serial: {0}'}"
+                                                           Style="{StaticResource CaptionStyle}"
+                                                           Margin="0,0,0,2"/>
+                                                <TextBlock Text="{Binding Firmware, StringFormat='Firmware: {0}'}"
+                                                           Style="{StaticResource CaptionStyle}"
+                                                           Margin="0,0,0,6"/>
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
+                                                    <TextBlock Text="🔋" FontSize="12" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                                    <ProgressBar Value="{Binding BatteryLevel}"
+                                                                 Maximum="100"
+                                                                 Height="4"
+                                                                 Width="80"
+                                                                 Style="{StaticResource BatteryProgressBarStyle}"/>
+                                                    <TextBlock Text="{Binding BatteryLevel, StringFormat='{}{0}%'}"
+                                                               Style="{StaticResource CaptionStyle}"
+                                                               Margin="4,0,0,0"
+                                                               VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                    
+                    <!-- Footer: Connect to Selected -->
+                    <Button Click="ConnectDevices_Click"
+                            IsEnabled="{Binding CanConnect}"
+                            HorizontalAlignment="Stretch"
+                            Margin="0,20,0,0"
+                            Padding="24,12">
                         <Button.Style>
-                            <Style TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}"/>
+                            <Style TargetType="Button" BasedOn="{StaticResource SuccessButtonStyle}"/>
                         </Button.Style>
                         <Button.Content>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="📡" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                <TextBlock Text="Discover Devices" VerticalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <TextBlock FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="🔗"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsConnecting}" Value="True">
+                                                    <Setter Property="Text" Value="⏳"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="Connect to Selected"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsConnecting}" Value="True">
+                                                    <Setter Property="Text" Value="Connecting…"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </StackPanel>
                         </Button.Content>
                     </Button>
                     
-                    <!-- Progress Bar -->
-                    <ProgressBar Value="{Binding DiscoveryProgress}"
-                                 Maximum="100"
-                                 Height="8"
-                                 Margin="0,16,0,0"
-                                 Visibility="{Binding IsDiscovering, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                 Style="{StaticResource ProgressBarStyle}">
-                        <ProgressBar.Triggers>
-                            <EventTrigger RoutedEvent="Loaded">
-                                <BeginStoryboard>
-                                    <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                         From="0" To="1" Duration="0:0:0.3"/>
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </EventTrigger>
-                        </ProgressBar.Triggers>
-                    </ProgressBar>
+                    <!-- Connecting progress -->
+                    <StackPanel Margin="0,12,0,0"
+                                Visibility="{Binding IsConnecting, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ProgressBar Value="{Binding ConnectionProgress}"
+                                     Maximum="100"
+                                     Height="6"
+                                     Style="{StaticResource ProgressBarStyle}"/>
+                        <TextBlock Text="{Binding ConnectionStatusMessage}"
+                                   Style="{StaticResource CaptionStyle}"
+                                   Margin="0,4,0,0"/>
+                    </StackPanel>
                     
-                    <!-- Discovering Status -->
-                    <TextBlock Text="Searching for devices..."
-                               Style="{StaticResource CaptionStyle}"
-                               HorizontalAlignment="Center"
-                               Margin="0,8,0,0"
-                               Visibility="{Binding IsDiscovering, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                    
-                    <!-- Found Status -->
+                    <!-- Success banner inside same card -->
                     <Border Style="{StaticResource StatusBannerSuccessStyle}"
                             Margin="0,16,0,0"
-                            Visibility="{Binding HasFoundDevices, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="✓" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding FoundDevicesMessage}" 
-                                       FontSize="14"
-                                       FontWeight="Medium"
-                                       VerticalAlignment="Center"/>
+                            Visibility="{Binding IsConnected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <TextBlock Text="✓" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Successfully connected to devices!"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Text="All devices are connected and ready for fitting"
+                                       Style="{StaticResource CaptionStyle}"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
             </Border>
-            
-            <!-- Step 4: Select Devices -->
-            <Border Style="{StaticResource StepCardStyle}" Margin="0,0,0,24">
-                <StackPanel>
-                    <Grid Margin="0,0,0,16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="Step 4: Select Devices" 
-                                   Style="{StaticResource Heading3Style}"
-                                   Grid.Column="0"/>
-                        <TextBlock Text="{Binding SelectedDevicesCount, StringFormat='{}{0} device(s) selected'}"
-                                   Style="{StaticResource CaptionStyle}"
-                                   Foreground="{StaticResource PrimaryBrush}"
-                                   FontWeight="Medium"
-                                   Grid.Column="1"
-                                   VerticalAlignment="Center"/>
-                    </Grid>
-                    
-                    <!-- Devices Grid -->
-                    <Grid Visibility="{Binding HasDevices, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="16"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        
-                        <!-- Left Ear Device -->
-                        <Border Grid.Column="0" 
-                                Style="{StaticResource DeviceCardLeftStyle}"
-                                MouseLeftButtonDown="DeviceCard_MouseLeftButtonDown"
-                                DataContext="{Binding LeftDevice}">
-                            <StackPanel>
-                                <CheckBox IsChecked="{Binding IsSelected}"
-                                          FontSize="16"
-                                          FontWeight="SemiBold"
-                                          Margin="0,0,0,12"
-                                          Checked="DeviceCheckBox_Checked"
-                                          Unchecked="DeviceCheckBox_Checked">
-                                    <CheckBox.Content>
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="🦻" FontSize="20" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                            <TextBlock Text="Left Ear" VerticalAlignment="Center"/>
-                                        </StackPanel>
-                                    </CheckBox.Content>
-                                </CheckBox>
-                                
-                                <TextBlock Text="{Binding Model}" 
-                                           FontSize="16"
-                                           FontWeight="SemiBold"
-                                           Margin="0,0,0,8"/>
-                                <TextBlock Text="{Binding SerialNumber, StringFormat='Serial Number: {0}'}" 
-                                           Style="{StaticResource CaptionStyle}"
-                                           Margin="0,0,0,4"/>
-                                <TextBlock Text="{Binding Firmware, StringFormat='Firmware: {0}'}" 
-                                           Style="{StaticResource CaptionStyle}"
-                                           Margin="0,0,0,12"/>
-                                
-                                <!-- Battery Indicator -->
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                    <TextBlock Text="🔋" FontSize="14" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                                    <ProgressBar Value="{Binding BatteryLevel}"
-                                                 Maximum="100"
-                                                 Height="6"
-                                                 Width="200"
-                                                 Style="{StaticResource BatteryProgressBarStyle}"/>
-                                    <TextBlock Text="{Binding BatteryLevel, StringFormat='{}{0}%'}"
-                                               Style="{StaticResource CaptionStyle}"
-                                               Margin="8,0,0,0"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-                        
-                        <!-- Right Ear Device -->
-                        <Border Grid.Column="2" 
-                                Style="{StaticResource DeviceCardRightStyle}"
-                                MouseLeftButtonDown="DeviceCard_MouseLeftButtonDown"
-                                DataContext="{Binding RightDevice}">
-                            <StackPanel>
-                                <CheckBox IsChecked="{Binding IsSelected}"
-                                          FontSize="16"
-                                          FontWeight="SemiBold"
-                                          Margin="0,0,0,12"
-                                          Checked="DeviceCheckBox_Checked"
-                                          Unchecked="DeviceCheckBox_Checked">
-                                    <CheckBox.Content>
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="🦻" FontSize="20" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                            <TextBlock Text="Right Ear" VerticalAlignment="Center"/>
-                                        </StackPanel>
-                                    </CheckBox.Content>
-                                </CheckBox>
-                                
-                                <TextBlock Text="{Binding Model}" 
-                                           FontSize="16"
-                                           FontWeight="SemiBold"
-                                           Margin="0,0,0,8"/>
-                                <TextBlock Text="{Binding SerialNumber, StringFormat='Serial Number: {0}'}" 
-                                           Style="{StaticResource CaptionStyle}"
-                                           Margin="0,0,0,4"/>
-                                <TextBlock Text="{Binding Firmware, StringFormat='Firmware: {0}'}" 
-                                           Style="{StaticResource CaptionStyle}"
-                                           Margin="0,0,0,12"/>
-                                
-                                <!-- Battery Indicator -->
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                    <TextBlock Text="🔋" FontSize="14" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                                    <ProgressBar Value="{Binding BatteryLevel}"
-                                                 Maximum="100"
-                                                 Height="6"
-                                                 Width="200"
-                                                 Style="{StaticResource BatteryProgressBarStyle}"/>
-                                    <TextBlock Text="{Binding BatteryLevel, StringFormat='{}{0}%'}"
-                                               Style="{StaticResource CaptionStyle}"
-                                               Margin="8,0,0,0"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-                    </Grid>
-                    
-                    <!-- No Devices Message -->
-                    <TextBlock Text="No devices found. Click 'Discover Devices' to search for hearing aids."
-                               HorizontalAlignment="Center"
-                               Margin="0,16,0,0">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock" BasedOn="{StaticResource CaptionStyle}">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasDevices}" Value="False">
-                                        <Setter Property="Visibility" Value="Visible"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </StackPanel>
-            </Border>
-            
-            <!-- Step 5: Connect -->
-            <StackPanel Margin="0,0,0,24">
-                <Button Click="ConnectDevices_Click"
-                        IsEnabled="{Binding CanConnect}"
-                        HorizontalAlignment="Stretch"
-                        Padding="24,12">
-                    <Button.Style>
-                        <Style TargetType="Button" BasedOn="{StaticResource SuccessButtonStyle}"/>
-                    </Button.Style>
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <TextBlock Text="🔗" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Connect to Selected Devices" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
-                
-                <!-- Connecting Status -->
-                <StackPanel Margin="0,16,0,0"
-                            Visibility="{Binding IsConnecting, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <StackPanel.Triggers>
-                        <EventTrigger RoutedEvent="Loaded">
-                            <BeginStoryboard>
-                                <Storyboard>
-                                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                     From="0" To="1" Duration="0:0:0.3"/>
-                                </Storyboard>
-                            </BeginStoryboard>
-                        </EventTrigger>
-                    </StackPanel.Triggers>
-                    <ProgressBar Value="{Binding ConnectionProgress}"
-                                 Maximum="100"
-                                 Height="8"
-                                 Style="{StaticResource ProgressBarStyle}"/>
-                    <TextBlock Text="{Binding ConnectionStatusMessage}"
-                               Style="{StaticResource CaptionStyle}"
-                               HorizontalAlignment="Center"
-                               Margin="0,8,0,0"/>
-                </StackPanel>
-                
-                <!-- Connected Success -->
-                <Border Style="{StaticResource StatusBannerSuccessStyle}"
-                        Margin="0,16,0,0"
-                        Visibility="{Binding IsConnected, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <Border.Triggers>
-                        <EventTrigger RoutedEvent="Loaded">
-                            <BeginStoryboard>
-                                <Storyboard>
-                                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                     From="0" To="1" Duration="0:0:0.5"/>
-                                </Storyboard>
-                            </BeginStoryboard>
-                        </EventTrigger>
-                    </Border.Triggers>
-                    <StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                            <TextBlock Text="✓" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Successfully connected to devices!" 
-                                       FontSize="14"
-                                       FontWeight="SemiBold"
-                                       VerticalAlignment="Center"/>
-                        </StackPanel>
-                        <TextBlock Text="All devices are connected and ready for fitting" 
-                                   Style="{StaticResource CaptionStyle}"/>
-                    </StackPanel>
-                </Border>
-            </StackPanel>
             
         </StackPanel>
     </ScrollViewer>

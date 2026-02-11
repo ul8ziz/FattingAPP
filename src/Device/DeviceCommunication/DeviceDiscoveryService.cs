@@ -121,6 +121,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             }
             catch (Exception ex)
             {
+                if (ScanDiagnostics.IsSdException(ex))
+                    ScanDiagnostics.LogSdExceptionDetails(null, ex);
                 Debug.WriteLine($"Error discovering device on {side} side: {ex.Message}");
                 throw new InvalidOperationException($"Failed to discover device on {side} side: {ex.Message}", ex);
             }

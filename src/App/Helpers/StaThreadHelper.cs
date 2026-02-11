@@ -4,8 +4,8 @@ using System.Threading;
 namespace Ul8ziz.FittingApp.App.Helpers
 {
     /// <summary>
-    /// Runs a delegate on a dedicated STA thread. Required for CTK/SDNET COM-based APIs
-    /// to avoid E_INVALID_STATE when calls are made from MTA/ThreadPool.
+    /// C) Dedicated STA thread runner. ALL CTK/sdnet calls must execute inside RunOnStaThread; no Task.Run/ThreadPool in scan path.
+    /// Required for CTK/SDNET COM-based APIs to avoid E_INVALID_STATE.
     /// </summary>
     public static class StaThreadHelper
     {

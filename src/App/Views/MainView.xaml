@@ -164,30 +164,47 @@
                     </Button>
                 </StackPanel>
 
-                <!-- Connection Status -->
+                <!-- Connection Status (driven by AppSessionState) -->
                 <Border Grid.Column="2" 
                         Style="{StaticResource StatusBadgeGrayStyle}"
                         Margin="0,0,16,0">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                            <TextBlock Text="Connection Status" 
-                                       FontSize="11"
-                                       Foreground="{StaticResource TextSecondaryBrush}"/>
-                            <TextBlock Text="{Binding ConnectionStatusText}" 
-                                       FontSize="14"
-                                       FontWeight="Medium"
-                                       Foreground="{StaticResource TextPrimaryBrush}"/>
-                        </StackPanel>
-                        <Ellipse Grid.Column="1" 
-                                 Width="12" 
-                                 Height="12" 
-                                 Fill="{Binding ConnectionStatusBrush}"
-                                 VerticalAlignment="Center"/>
-                    </Grid>
+                    <StackPanel Orientation="Horizontal">
+                        <Grid Margin="0,0,12,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                <TextBlock Text="Connection Status" 
+                                           FontSize="11"
+                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                <TextBlock Text="{Binding ConnectionStatusText}" 
+                                           FontSize="14"
+                                           FontWeight="Medium"
+                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                <TextBlock Text="{Binding ConnectedDeviceDisplayName}" 
+                                           FontSize="12"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           Margin="0,2,0,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsConnectedDeviceNameVisible}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                            <Ellipse Grid.Column="1" 
+                                     Width="12" 
+                                     Height="12" 
+                                     Fill="{Binding ConnectionStatusBrush}"
+                                     VerticalAlignment="Center"/>
+                        </Grid>
+                    </StackPanel>
                 </Border>
 
                 <!-- User Info -->
@@ -263,7 +280,7 @@
                             <Button Style="{StaticResource NavigationButtonStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="PatientManagement"
-                                    IsEnabled="{Binding IsDeviceReady}"
+                                    IsEnabled="{Binding IsNavigationEnabled}"
                                     Margin="0,0,0,4">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal">
@@ -277,7 +294,7 @@
                             <Button Style="{StaticResource NavigationButtonStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Audiogram"
-                                    IsEnabled="{Binding IsDeviceReady}"
+                                    IsEnabled="{Binding IsNavigationEnabled}"
                                     Margin="0,0,0,4">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal">
@@ -291,7 +308,7 @@
                             <Button Style="{StaticResource NavigationButtonStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Fitting"
-                                    IsEnabled="{Binding IsDeviceReady}"
+                                    IsEnabled="{Binding IsNavigationEnabled}"
                                     Margin="0,0,0,4">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal">
@@ -305,12 +322,25 @@
                             <Button Style="{StaticResource NavigationButtonStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="SessionSummary"
-                                    IsEnabled="{Binding IsDeviceReady}"
+                                    IsEnabled="{Binding IsNavigationEnabled}"
                                     Margin="0,0,0,4">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="📄" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
                                         <TextBlock Text="Session Summary" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+
+                            <!-- Diagnostics -->
+                            <Button Style="{StaticResource NavigationButtonStyle}"
+                                    Click="DiagnosticsButton_Click"
+                                    Margin="0,0,0,4"
+                                    ToolTip="Run HI-PRO diagnostic report (docs/ and logs/)">
+                                <Button.Content>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="🔧" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Diagnostics" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
