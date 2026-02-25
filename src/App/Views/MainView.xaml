@@ -11,6 +11,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="../Styles/Styles.xaml"/>
+                <ResourceDictionary Source="../Styles/SidebarStyles.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </UserControl.Resources>
@@ -231,28 +232,41 @@
                     </Grid.RowDefinitions>
 
                     <!-- Navigation Header -->
+                    <StackPanel Grid.Row="0" Margin="16,20,16,0">
+                        <TextBlock Text="Navigation"
+                                   FontFamily="Segoe UI"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                        <TextBlock Text="Fitting Workflow"
+                                   FontFamily="Segoe UI"
+                                   FontSize="12"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   Margin="0,2,0,0"/>
+                        <Border Height="1" Background="{StaticResource Gray200Brush}" Margin="0,14,0,0"/>
+                    </StackPanel>
 
                     <!-- Navigation Items -->
-                    <ScrollViewer Grid.Row="1" 
-                                  VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel Margin="16,16,16,0">
+                    <ScrollViewer Grid.Row="1"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="12,16,12,0">
 
                             <!-- Connect Devices (disabled while Configure Device is running) -->
-                            <Button Style="{StaticResource NavigationButtonStyle}"
+                            <Button Style="{StaticResource SidebarNavButtonStyle}"
                                     Click="ConnectDevicesButton_Click"
                                     IsEnabled="{Binding CanNavigateToConnect}"
                                     Margin="0,0,0,4">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="🔌" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Connect Devices" VerticalAlignment="Center"/>
+                                        <TextBlock Text="&#xE8AB;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Connect Devices" FontFamily="Segoe UI" FontSize="14" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
 
                             <!-- Audiogram (Graphs: Freq Gain, I/O) - always available; uses session data when connected or library loaded -->
-                            <Button Style="{StaticResource NavigationButtonStyle}"
+                            <Button Style="{StaticResource SidebarNavButtonStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Audiogram"
                                     IsEnabled="True"
@@ -260,28 +274,28 @@
                                     ToolTip="Graphs: Frequency Gain, I/O">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="📊" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Audiogram" VerticalAlignment="Center"/>
+                                        <TextBlock Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Audiogram" FontFamily="Segoe UI" FontSize="14" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
 
                             <!-- Fitting -->
-                            <Button Style="{StaticResource NavigationButtonStyle}"
+                            <Button Style="{StaticResource SidebarNavButtonStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Fitting"
                                     IsEnabled="{Binding IsNavigationEnabled}"
                                     Margin="0,0,0,4">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="⚙️" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Fitting" VerticalAlignment="Center"/>
+                                        <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Fitting" FontFamily="Segoe UI" FontSize="14" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
 
                             <!-- Session Summary (disabled until implemented) -->
-                            <Button Style="{StaticResource NavigationButtonStyle}"
+                            <Button Style="{StaticResource SidebarNavButtonStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="SessionSummary"
                                     IsEnabled="False"
@@ -289,28 +303,36 @@
                                     ToolTip="Not yet implemented">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="📄" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Session Summary" VerticalAlignment="Center"/>
+                                        <TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Session Summary" FontFamily="Segoe UI" FontSize="14" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
                         </StackPanel>
                     </ScrollViewer>
 
-                    <!-- System Info Footer -->
-                    <Border Grid.Row="2" 
+                    <!-- System Info (static text only) -->
+                    <Border Grid.Row="2"
                             BorderBrush="{StaticResource Gray200Brush}"
                             BorderThickness="0,1,0,0"
                             Padding="16,16">
                         <StackPanel>
-                            <TextBlock Text="System Info" 
-                                       FontSize="12"
-                                       FontWeight="Medium"
-                                       Foreground="{StaticResource TextPrimaryBrush}"
+                            <TextBlock Text="System Info"
+                                       FontFamily="Segoe UI"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#374151"
                                        Margin="0,0,0,8"/>
-                            <TextBlock Text="Version 1.0.0" 
-                                       FontSize="11"
-                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                            <TextBlock Text="Version 1.0.0"
+                                       FontFamily="Segoe UI"
+                                       FontSize="12"
+                                       Foreground="#4B5563"
+                                       Margin="0,0,0,4"/>
+                            <TextBlock Text="Developed by ul8ziz"
+                                       FontFamily="Segoe UI"
+                                       FontSize="12"
+                                       Foreground="#4B5563"
+                                       Margin="0,0,0,4"/>
                         </StackPanel>
                     </Border>
                 </Grid>
