@@ -26,25 +26,46 @@ Ul8ziz.FittingApp provides a modern, maintainable codebase for hearing aid fitti
 
 - **.NET 10** with Windows Presentation Foundation (WPF) (required by current sdnet.dll; see note below)
 - **C#** for application logic
-- **Ezairo Sound Designer SDK** for device communication
-- **SQLite** for local data persistence
-- **xUnit** for unit testing
+- **Ezairo Sound Designer SDK** for device communication (sdnet.dll, CTK)
+- **x86 (32-bit)** for HI-PRO/FTDI compatibility; build with `Platform=x86`
 
 ## Repository Structure
 
+The solution contains the WPF app, the device/SDK layer, and optional tools. SDK assets are embedded in the App output; no separate Core/Data/Shared projects in the solution.
+
 ```
 FattingAPP/
+├── Ul8ziz.FittingApp.sln
+├── global.json                    # .NET SDK 10.0
 ├── src/
-│   ├── App/              # WPF UI project
-│   ├── Core/             # Domain models and business logic interfaces
-│   ├── Device/           # SDK interop layer and device communication
-│   ├── Data/             # SQLite persistence layer
-│   └── Shared/           # Shared utilities and common types
-├── tests/                # Unit tests
-├── docs/                 # Documentation
-├── scripts/              # Build and setup scripts
-└── SoundDesignerSDK/     # Ezairo SDK (read-only, must exist at repo root)
+│   ├── App/                       # WPF application (entry: Ul8ziz.FittingApp.App)
+│   │   ├── Views/, ViewModels/, Services/, Helpers/, Models/
+│   │   ├── DeviceCommunication/   # HiPro D2XX (D2xxLoader, HiProService, etc.)
+│   │   ├── Assets/SoundDesigner/   # sd.config, *.library, *.param
+│   │   ├── NativeDeps/HI-PRO/     # ftd2xx.dll, FTD2XX_NET.dll, HiProWrapper.dll
+│   │   └── Properties/PublishProfiles/Release-win-x86.pubxml
+│   ├── Device/
+│   │   └── DeviceCommunication/   # SDK interop, SdkGate, scan, discovery, LibraryService, etc.
+│   └── Tools/
+│       ├── Ftd2xxTest/            # D2XX probe console app
+│       └── HiproD2xxProbe/        # HI-PRO D2XX probe
+├── installer/                     # Inno Setup script (FittingApp.iss) → setup.exe
+├── scripts/                       # publish-release.ps1, diagnostics, check-ftdi, etc.
+├── docs/                          # HI-PRO_D2XX, FITTING_DEVELOPER_NOTE, SCAN_REQUIREMENTS, etc.
+├── publish/                       # Publish output (gitignored): FittingApp/, *.zip, *-Setup-*.exe
+└── SoundDesignerSDK/              # Ezairo SDK (read-only; must exist at repo root for setup)
 ```
+
+### Build and installer summary
+
+| Action | Command | Output |
+|--------|---------|--------|
+| Build | `dotnet build` (or Visual Studio, config **x86**) | `src\App\bin\x86\Debug\net10.0-windows\` or Release |
+| Publish (self-contained) | `.\scripts\publish-release.ps1` | `publish\FittingApp\` (run `Ul8ziz.FittingApp.App.exe` without installing .NET) |
+| ZIP for distribution | `.\scripts\publish-release.ps1 -CreateZip` | `publish\FittingApp-Release.zip` |
+| Windows installer | `.\scripts\publish-release.ps1 -BuildInstaller` | `publish\FittingApp-Setup-1.0.0.exe` (Inno Setup; downloaded to `tools\InnoSetup` if needed) |
+
+Publish profile: `src/App/Properties/PublishProfiles/Release-win-x86.pubxml` (win-x86, self-contained). The installer script is `installer/FittingApp.iss`; it installs to Program Files (x86), Start Menu, Add/Remove Programs, optional desktop icon, and requires Windows 10+.
 
 ## Prerequisites
 
@@ -392,10 +413,43 @@ Open `Ul8ziz.FittingApp.sln` in Visual Studio 2022 and build the solution. The a
 
 **Current target: .NET 10.** The `sdnet.dll` in `src/Device/Libs/` is built for .NET 10 (System.Runtime 10.0), so the solution targets `net10.0-windows` / `net10.0` and `global.json` requests SDK 10. If you obtain an sdnet built for .NET 8, you can switch the projects back to `net8.0-windows` / `net8.0` and use .NET 8 SDK.
 
+### Creating an installable release
+
+To build a **runnable, self-contained** version that you can copy to another PC or package for installation:
+
+1. **Publish the app** (from the repository root):
+   ```powershell
+   .\scripts\publish-release.ps1
+   ```
+   This builds a Release, **win-x86**, **self-contained** output into `publish\FittingApp\`. No .NET runtime needs to be installed on the target machine.
+
+2. **Optional: create a ZIP** for distribution:
+   ```powershell
+   .\scripts\publish-release.ps1 -CreateZip
+   ```
+   This creates `publish\FittingApp-Release.zip`. Unzip on the target PC and run `Ul8ziz.FittingApp.App.exe`.
+
+3. **Conventional Windows installer (setup.exe)**  
+   From repo root run:
+   ```powershell
+   .\scripts\publish-release.ps1 -BuildInstaller
+   ```
+   This publishes the app and builds **FittingApp-Setup-1.0.0.exe** in `publish\`. If Inno Setup is not installed, the script downloads and installs it once into `tools\InnoSetup`. The resulting setup is a standard Windows installer: wizard, default path under Program Files (x86), Start Menu group, Add/Remove Programs, optional desktop icon. Run the setup on the target PC to install like any other application (Windows 10+).
+
+**One-liner for full release (publish + ZIP + setup.exe):**
+   ```powershell
+   .\scripts\publish-release.ps1 -CreateZip -BuildInstaller
+   ```
+
+**Note:** The published app is 32-bit (x86) and includes HI-PRO/FTDI native DLLs. Target machines still need the [SDK runtime prerequisites](#sdk-runtime-prerequisites) (e.g. CTK Runtime, VC++ redistributables) if they use wired programmers.
+
 ## Documentation
 
-- **Setup Guide:** For detailed step-by-step setup instructions, including prerequisites installation and troubleshooting, see [docs/Setup.md](docs/Setup.md).
-- **Scan Requirements:** For comprehensive requirements and troubleshooting guide for programmer scanning, see [docs/SCAN_REQUIREMENTS.md](docs/SCAN_REQUIREMENTS.md).
+- **[docs/HI-PRO_D2XX.md](docs/HI-PRO_D2XX.md)** — D2XX setup, x86, DLL locations, common errors.
+- **[docs/FITTING_DEVELOPER_NOTE.md](docs/FITTING_DEVELOPER_NOTE.md)** — Interpreting debug output (log.txt, Output window), build vs runtime, key types and locations.
+- **[docs/SCAN_REQUIREMENTS.md](docs/SCAN_REQUIREMENTS.md)** — Programmer scan requirements and troubleshooting.
+- **Setup:** [docs/Setup.md](docs/Setup.md) (if present); otherwise see [Prerequisites](#prerequisites) and [Setup Steps](#setup-steps) in this README.
+- **Installer:** [installer/README.md](installer/README.md) — How to build the Windows setup (Inno Setup) manually.
 
 ### HI-PRO preflight and diagnostics (files changed/added)
 
@@ -419,6 +473,6 @@ Open `Ul8ziz.FittingApp.sln` in Visual Studio 2022 and build the solution. The a
 
 - The `SoundDesignerSDK/` folder is treated as read-only. Do not modify files within this directory.
 - SDK runtime files are copied into `src/Device/Libs/` by the setup scripts. These files are tracked in the repository.
-- The application targets **Windows x86 (32-bit)** because the CTK HI-PRO communication module (`HI-PRO.dll`) is only available in 32-bit. The SDK provides both win32 and win64 binaries; this project uses `win32`. The WPF app project enforces **PlatformTarget=x86** and copies **ftd2xx.dll**, **FTD2XX_NET.dll**, **HiProWrapper.dll** from **src/App/Vendor/HI-PRO/** into the build output (`$(TargetDir)`) on every build; a **VerifyHiproDlls** target fails the build if any of these are missing. Populate `src/App/Vendor/HI-PRO/` once from `C:\Program Files (x86)\HI-PRO` if needed (see that folder's README.txt).
+- The application targets **Windows x86 (32-bit)** because the CTK HI-PRO communication module (`HI-PRO.dll`) is only available in 32-bit. The WPF app enforces **PlatformTarget=x86** and copies **ftd2xx.dll**, **FTD2XX_NET.dll**, **HiProWrapper.dll** from **src/App/NativeDeps/HI-PRO/** into the build output on every build; **VerifyNativeDeps** fails the build if any are missing. Populate `src/App/NativeDeps/HI-PRO/` from `C:\Program Files (x86)\HI-PRO` if needed (see that folder's README.txt).
 - **Programmer scan:** Wired scan runs on **one dedicated STA thread** (no Task.Run/ThreadPool), with **SemaphoreSlim(1,1)** so only one scan at a time and no parallel CTK calls. Adaptive logic: try CTK interface strings (HI-PRO first if present), then all CTK_IF, then **COM2-only** fallback (COM3/COM4 ignored). **SetDllDirectory(HI-PRO)** is set before CTK so ftd2xx.dll loads from HI-PRO first; process PATH is set to AppBaseDir; HI-PRO; CTK; CTK\communication_modules. Wireless scan calls `BeginScanForWirelessDevices` before creating wireless interfaces (avoids E_CALL_SCAN).
 - **SDK Path:** The project expects the SDK at `./SoundDesignerSDK/` relative to the repository root. If your SDK is in a different location (e.g., `C:\Users\...\Ezairo Pre Suite Firmware, Sound Designer and SDK\SoundDesignerSDK\SoundDesignerSDK`), ensure the **inner** `SoundDesignerSDK` folder (the one containing `binaries/`, `documentation/`, `samples/`) is accessible. Setup scripts should reference this SDK root path.
