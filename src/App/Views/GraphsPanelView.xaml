@@ -1,0 +1,117 @@
+<UserControl x:Class="Ul8ziz.FittingApp.App.Views.GraphsPanelView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Ul8ziz.FittingApp.App.ViewModels"
+             xmlns:controls="clr-namespace:Ul8ziz.FittingApp.App.Views.Controls"
+             mc:Ignorable="d"
+             d:DesignHeight="500" d:DesignWidth="320"
+             MinWidth="280">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../Styles/Styles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Border Background="{StaticResource WhiteBrush}"
+            BorderBrush="{StaticResource Gray200Brush}"
+            BorderThickness="1" CornerRadius="8" Padding="12">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <!-- Freq. Gain -->
+                <Expander Header="Freq. Gain" IsExpanded="True" Margin="0,0,0,8">
+                    <Expander.HeaderTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="Freq. Gain" FontWeight="SemiBold" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </DataTemplate>
+                    </Expander.HeaderTemplate>
+                    <StackPanel Margin="0,8,0,0">
+                        <ComboBox ItemsSource="{Binding OctaveOptions}" SelectedItem="{Binding SelectedOctave}"
+                                  Margin="0,0,0,8" Padding="8,6" FontSize="12"/>
+                        <TextBlock Text="Curve levels (dB)" FontSize="11" Foreground="{StaticResource Gray600Brush}" Margin="0,0,0,4"/>
+                        <ListBox ItemsSource="{Binding FreqGainCurveLevels}"
+                                 VirtualizingStackPanel.IsVirtualizing="True"
+                                 VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                 MaxHeight="140" BorderThickness="0" Background="Transparent">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <Border Grid.Column="1" Width="14" Height="14" CornerRadius="2" VerticalAlignment="Center" Margin="0,0,8,0">
+                                            <Border.Background>
+                                                <SolidColorBrush Color="#2563EB"/>
+                                            </Border.Background>
+                                        </Border>
+                                        <TextBox Grid.Column="2" Text="{Binding Level, Mode=OneWay}"
+                                                 Width="44" Padding="4,2" FontSize="12" VerticalContentAlignment="Center" IsReadOnly="True"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <Button Command="{Binding RefreshGraphsCommand}" Content="Refresh" Margin="0,6,0,0"
+                                Style="{StaticResource SecondaryButtonStyle}" Padding="8,4" FontSize="12"/>
+                        <TextBlock Text="{Binding MappingNotConfiguredMessage}" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" TextWrapping="Wrap" Margin="0,6,0,0">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding MappingNotConfiguredMessage}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding MappingNotConfiguredMessage}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <controls:PlotControl DataContext="{Binding FreqGainPlot}" Margin="0,8,0,0" Height="200"/>
+                    </StackPanel>
+                </Expander>
+
+                <!-- I/O (Input/Output) -->
+                <Expander Header="I/O" IsExpanded="True" Margin="0,0,0,8">
+                    <Expander.HeaderTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="Input/Output" FontWeight="SemiBold" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </DataTemplate>
+                    </Expander.HeaderTemplate>
+                    <StackPanel Margin="0,8,0,0">
+                        <Button Command="{Binding RefreshGraphsCommand}" Content="Refresh" Margin="0,0,0,6"
+                                Style="{StaticResource SecondaryButtonStyle}" Padding="8,4" FontSize="12"/>
+                        <controls:PlotControl DataContext="{Binding IOPlot}" Margin="0,0,0,0" Height="200"/>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Input Signal (placeholder) -->
+                <Expander Header="Input Signal" IsExpanded="False" Margin="0,0,0,8">
+                    <Expander.HeaderTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="Input Signal" FontWeight="SemiBold" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </DataTemplate>
+                    </Expander.HeaderTemplate>
+                    <TextBlock Text="Not implemented" FontSize="12" Foreground="{StaticResource Gray500Brush}" Margin="0,8,0,0"/>
+                </Expander>
+
+                <!-- Transducers (placeholder) -->
+                <Expander Header="Transducers" IsExpanded="False" Margin="0,0,0,0">
+                    <Expander.HeaderTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="Transducers" FontWeight="SemiBold" FontSize="14" Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </DataTemplate>
+                    </Expander.HeaderTemplate>
+                    <TextBlock Text="Not implemented" FontSize="12" Foreground="{StaticResource Gray500Brush}" Margin="0,8,0,0"/>
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+    </Border>
+</UserControl>

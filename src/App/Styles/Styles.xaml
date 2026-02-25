@@ -450,6 +450,38 @@
         <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
     </Style>
     
+    <!-- ========== Loading / Progress UX (reusable across Fitting, Connect, etc.) ========== -->
+    <!-- Semi-transparent overlay background (use behind loading card for "busy" feel) -->
+    <SolidColorBrush x:Key="LoadingOverlayBrush" Color="#E6FFFFFF"/>
+    <!-- Card style for centered loading block: white, subtle shadow, rounded -->
+    <Style x:Key="LoadingOverlayCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource WhiteBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Gray200Brush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="32,24"/>
+        <Setter Property="Effect">
+            <Setter.Value>
+                <DropShadowEffect BlurRadius="16" ShadowDepth="0" Opacity="0.08" Color="#000000"/>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- Indeterminate progress bar for loading states (primary color, thin) -->
+    <Style x:Key="LoadingIndeterminateProgressBarStyle" TargetType="ProgressBar" BasedOn="{StaticResource ProgressBarStyle}">
+        <Setter Property="IsIndeterminate" Value="True"/>
+        <Setter Property="Height" Value="4"/>
+        <Setter Property="Width" Value="240"/>
+        <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+    </Style>
+    <!-- Message text below the bar (secondary color, centered) -->
+    <Style x:Key="LoadingMessageStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionStyle}">
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="Margin" Value="0,12,0,0"/>
+        <Setter Property="MaxWidth" Value="320"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="TextAlignment" Value="Center"/>
+    </Style>
+    
     <!-- Status Banner Success Style -->
     <Style x:Key="StatusBannerSuccessStyle" TargetType="Border">
         <Setter Property="Background" Value="{StaticResource GreenBrush}"/>

@@ -1,0 +1,521 @@
+<UserControl x:Class="Ul8ziz.FittingApp.App.Views.FittingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Ul8ziz.FittingApp.App.ViewModels"
+             xmlns:models="clr-namespace:Ul8ziz.FittingApp.App.Models"
+             xmlns:controls="clr-namespace:Ul8ziz.FittingApp.App.Views.Controls"
+             mc:Ignorable="d"
+             d:DesignHeight="700" d:DesignWidth="1100"
+             Background="{StaticResource BackgroundBrush}">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../Styles/Styles.xaml"/>
+                <ResourceDictionary Source="../Styles/ParameterFieldStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Converters -->
+            <vm:DataTypeToVisibilityConverter x:Key="DataTypeToVisibilityConverter"/>
+            <vm:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter"/>
+            <vm:InverseBoolConverter x:Key="InverseBoolConverter"/>
+            <vm:TabIdEqualsConverter x:Key="TabIdEqualsConverter"/>
+            <vm:ObjectToDoubleConverter x:Key="ObjectToDoubleConverter"/>
+            <vm:ObjectToBoolConverter x:Key="ObjectToBoolConverter"/>
+            <vm:DoubleNaNToFallbackConverter x:Key="DoubleNaNToFallbackConverter"/>
+
+            <!-- Value control template: rendered inside ParameterFieldCard (ComboBox, Slider, Toggle, etc.) -->
+            <DataTemplate x:Key="ParameterValueTemplate">
+                <StackPanel>
+                    <!-- DOUBLE: Slider + value readout + range hint -->
+                    <StackPanel Visibility="{Binding SettingDataType, Converter={StaticResource DataTypeToVisibilityConverter}, ConverterParameter=Double}">
+                        <Grid Visibility="{Binding HasRange, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Slider Grid.Column="0" Style="{StaticResource ParameterSliderStyle}"
+                                    Minimum="{Binding Min, Converter={StaticResource DoubleNaNToFallbackConverter}, ConverterParameter=0}"
+                                    Maximum="{Binding Max, Converter={StaticResource DoubleNaNToFallbackConverter}, ConverterParameter=100}"
+                                    Value="{Binding Value, Mode=TwoWay, Converter={StaticResource ObjectToDoubleConverter}}"
+                                    TickFrequency="{Binding SafeTickFrequency}"
+                                    IsSnapToTickEnabled="{Binding HasStep}"
+                                    IsEnabled="{Binding ReadOnly, Converter={StaticResource InverseBoolConverter}}"
+                                    SmallChange="{Binding SafeTickFrequency}"
+                                    VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1" Style="{StaticResource ParameterNumericInputStyle}"
+                                     Text="{Binding FormattedValue, Mode=OneWay}" IsReadOnly="True"
+                                     Margin="8,0,0,0" Width="56"
+                                     Visibility="{Binding HasRange, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        </Grid>
+                        <TextBlock Visibility="{Binding HasRange, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                   Text="{Binding ValueWithUnit, Mode=OneWay}" FontSize="13"
+                                   Foreground="{StaticResource Gray700Brush}" VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource ParameterRangeHintStyle}" Margin="0,4,0,0"
+                                   Visibility="{Binding HasRange, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Run Text="{Binding MinLabel, Mode=OneWay}"/>
+                            <Run Text=" – "/>
+                            <Run Text="{Binding MaxLabel, Mode=OneWay}"/>
+                        </TextBlock>
+                    </StackPanel>
+
+                    <!-- INT: Slider + value readout + range hint -->
+                    <StackPanel Visibility="{Binding SettingDataType, Converter={StaticResource DataTypeToVisibilityConverter}, ConverterParameter=Int}">
+                        <Grid Visibility="{Binding HasRange, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Slider Grid.Column="0" Style="{StaticResource ParameterSliderStyle}"
+                                    Minimum="{Binding Min, Converter={StaticResource DoubleNaNToFallbackConverter}, ConverterParameter=0}"
+                                    Maximum="{Binding Max, Converter={StaticResource DoubleNaNToFallbackConverter}, ConverterParameter=100}"
+                                    Value="{Binding Value, Mode=TwoWay, Converter={StaticResource ObjectToDoubleConverter}}"
+                                    TickFrequency="{Binding SafeTickFrequency}"
+                                    IsSnapToTickEnabled="{Binding HasStep}"
+                                    IsEnabled="{Binding ReadOnly, Converter={StaticResource InverseBoolConverter}}"
+                                    SmallChange="1" VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1" Style="{StaticResource ParameterNumericInputStyle}"
+                                     Text="{Binding FormattedValue, Mode=OneWay}" IsReadOnly="True"
+                                     Margin="8,0,0,0" Width="56"
+                                     Visibility="{Binding HasRange, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        </Grid>
+                        <TextBlock Visibility="{Binding HasRange, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                   Text="{Binding ValueWithUnit, Mode=OneWay}" FontSize="13"
+                                   Foreground="{StaticResource Gray700Brush}" VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource ParameterRangeHintStyle}" Margin="0,4,0,0"
+                                   Visibility="{Binding HasRange, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Run Text="{Binding MinLabel, Mode=OneWay}"/>
+                            <Run Text=" – "/>
+                            <Run Text="{Binding MaxLabel, Mode=OneWay}"/>
+                        </TextBlock>
+                    </StackPanel>
+
+                    <!-- ENUM: ComboBox -->
+                    <ComboBox Visibility="{Binding SettingDataType, Converter={StaticResource DataTypeToVisibilityConverter}, ConverterParameter=Enum}"
+                              Style="{StaticResource ParameterComboBoxStyle}"
+                              ItemsSource="{Binding EnumValues}"
+                              SelectedIndex="{Binding SelectedEnumIndex, Mode=TwoWay}"
+                              IsEnabled="{Binding ReadOnly, Converter={StaticResource InverseBoolConverter}}"
+                              MinWidth="140"/>
+
+                    <!-- BOOL: Toggle switch -->
+                    <StackPanel Visibility="{Binding SettingDataType, Converter={StaticResource DataTypeToVisibilityConverter}, ConverterParameter=Bool}"
+                                Orientation="Horizontal" VerticalAlignment="Center">
+                        <CheckBox Style="{StaticResource ParameterToggleSwitchStyle}"
+                                  IsChecked="{Binding Value, Mode=TwoWay, Converter={StaticResource ObjectToBoolConverter}}"
+                                  IsEnabled="{Binding ReadOnly, Converter={StaticResource InverseBoolConverter}}"
+                                  VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding BoolLabel, Mode=OneWay}" VerticalAlignment="Center"
+                                   FontSize="12" Foreground="{StaticResource Gray600Brush}" Margin="8,0,0,0"/>
+                    </StackPanel>
+
+                    <!-- STRING: read-only -->
+                    <TextBlock Visibility="{Binding SettingDataType, Converter={StaticResource DataTypeToVisibilityConverter}, ConverterParameter=String}"
+                               Text="{Binding ValueString, Mode=OneWay}" FontSize="13"
+                               Foreground="{StaticResource Gray700Brush}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </DataTemplate>
+
+            <!-- Parameter row: card with title, description, value area, unit, reset, dirty -->
+            <DataTemplate x:Key="ParameterRowTemplate">
+                <controls:ParameterFieldCard ValueTemplate="{StaticResource ParameterValueTemplate}"/>
+            </DataTemplate>
+
+            <!-- Lazy group: Expander with ListView of Rows (Rows loaded when expanded) -->
+            <Style x:Key="LeftGroupExpanderStyle" TargetType="Expander" BasedOn="{StaticResource ParameterGroupExpanderStyle}">
+                <EventSetter Event="Expanded" Handler="OnLeftGroupExpanded"/>
+            </Style>
+            <Style x:Key="RightGroupExpanderStyle" TargetType="Expander" BasedOn="{StaticResource ParameterGroupExpanderStyle}">
+                <EventSetter Event="Expanded" Handler="OnRightGroupExpanded"/>
+            </Style>
+            <DataTemplate x:Key="LeftGroupTemplate" DataType="models:GroupDescriptor">
+                <Expander DockPanel.Dock="Top" Style="{StaticResource LeftGroupExpanderStyle}">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Title}" VerticalAlignment="Center"/>
+                            <Border Background="{StaticResource Gray100Brush}" CornerRadius="10"
+                                    Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <TextBlock FontSize="11" Foreground="{StaticResource Gray600Brush}">
+                                    <Run Text="{Binding ParamsCount, Mode=OneWay}"/>
+                                    <Run Text=" params"/>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
+                    </Expander.Header>
+                    <ListView ItemsSource="{Binding Rows}"
+                              ItemTemplate="{StaticResource ParameterRowTemplate}"
+                              VirtualizingStackPanel.IsVirtualizing="True"
+                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ScrollViewer.CanContentScroll="True"
+                              BorderThickness="0" Background="Transparent"
+                              HorizontalContentAlignment="Stretch" SelectionMode="Single" Padding="0">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="0"/>
+                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListViewItem">
+                                            <ContentPresenter/>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                    </ListView>
+                </Expander>
+            </DataTemplate>
+            <DataTemplate x:Key="RightGroupTemplate" DataType="models:GroupDescriptor">
+                <Expander DockPanel.Dock="Top" Style="{StaticResource RightGroupExpanderStyle}">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Title}" VerticalAlignment="Center"/>
+                            <Border Background="{StaticResource Gray100Brush}" CornerRadius="10"
+                                    Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <TextBlock FontSize="11" Foreground="{StaticResource Gray600Brush}">
+                                    <Run Text="{Binding ParamsCount, Mode=OneWay}"/>
+                                    <Run Text=" params"/>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
+                    </Expander.Header>
+                    <ListView ItemsSource="{Binding Rows}"
+                              ItemTemplate="{StaticResource ParameterRowTemplate}"
+                              VirtualizingStackPanel.IsVirtualizing="True"
+                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ScrollViewer.CanContentScroll="True"
+                              BorderThickness="0" Background="Transparent"
+                              HorizontalContentAlignment="Stretch" SelectionMode="Single" Padding="0">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="0"/>
+                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListViewItem">
+                                            <ContentPresenter/>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                    </ListView>
+                </Expander>
+            </DataTemplate>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- ======================================================================
+         MAIN LAYOUT: Grid with fixed rows (no outer ScrollViewer)
+         This gives the content area a constrained height so that
+         VirtualizingStackPanel in the ListView actually virtualizes.
+         ====================================================================== -->
+    <Grid Margin="24,16,24,16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>  <!-- Row 0: Header -->
+            <RowDefinition Height="Auto"/>  <!-- Row 1: Toolbar -->
+            <RowDefinition Height="Auto"/>  <!-- Row 2: Error banner -->
+            <RowDefinition Height="Auto"/>  <!-- Row 3: Tab strip + Search -->
+            <RowDefinition Height="*"/>     <!-- Row 4: Content (fills remaining height) -->
+        </Grid.RowDefinitions>
+
+        <!-- ===== ROW 0: Header ===== -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Fitting" Style="{StaticResource Heading1Style}" Margin="0,0,0,2"/>
+                    <TextBlock Style="{StaticResource CaptionStyle}">
+                        <Run Text="{Binding ModeLabel, Mode=OneWay}"/>
+                        <Run Text="  —  "/>
+                        <Run Text="{Binding VisibleParamCount, Mode=OneWay, StringFormat='{}{0} parameters'}"/>
+                    </TextBlock>
+                </StackPanel>
+                <TextBlock Grid.Column="1" Text="{Binding ParamFileName, Mode=OneWay}"
+                           VerticalAlignment="Bottom" FontSize="11"
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           ToolTip="Currently loaded .param preset file"/>
+            </Grid>
+        </StackPanel>
+
+        <!-- ===== ROW 1: Toolbar ===== -->
+        <Border Grid.Row="1" Style="{StaticResource CardStyle}" Margin="0,0,0,12" Padding="12,8">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>  <!-- Memory selector -->
+                    <ColumnDefinition Width="Auto"/>  <!-- Live Mode -->
+                    <ColumnDefinition Width="Auto"/>  <!-- Refresh -->
+                    <ColumnDefinition Width="*"/>     <!-- Spacer -->
+                    <ColumnDefinition Width="Auto"/>  <!-- Configure -->
+                    <ColumnDefinition Width="Auto"/>  <!-- Save -->
+                </Grid.ColumnDefinitions>
+
+                <!-- Memory Selector -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="0,0,16,0" VerticalAlignment="Center">
+                    <TextBlock Text="Memory:" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="13" FontWeight="Medium"
+                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                    <ComboBox ItemsSource="{Binding MemoryNames}"
+                              SelectedIndex="{Binding SelectedMemoryIndex}"
+                              Width="120" VerticalAlignment="Center" Padding="8,5"
+                              ToolTip="Select memory profile (1-8)"/>
+                </StackPanel>
+
+                <!-- Live Mode toggle -->
+                <Button Grid.Column="1" Command="{Binding EnableLiveModeCommand}"
+                        Margin="0,0,6,0" Padding="14,8">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsLiveModeEnabled}" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+                                    <Setter Property="Foreground" Value="{StaticResource WhiteBrush}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                    <TextBlock Text="{Binding LiveModeLabel}" VerticalAlignment="Center" FontSize="13"/>
+                </Button>
+
+                <!-- Refresh -->
+                <Button Grid.Column="2" Command="{Binding RefreshReadCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Margin="0,0,6,0" Padding="14,8"
+                        ToolTip="Re-read all parameters from device">
+                    <TextBlock Text="Refresh" VerticalAlignment="Center" FontSize="13"/>
+                </Button>
+
+                <!-- Configure Device (visible when connected but not configured) -->
+                <Button Grid.Column="4" Command="{Binding ConfigureDeviceCommand}"
+                        Visibility="{Binding ShowConfigureButton, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Margin="0,0,8,0" Padding="14,8"
+                        ToolTip="{Binding ConfigureDeviceToolTip}">
+                    <TextBlock Text="Configure" FontSize="13"/>
+                </Button>
+
+                <!-- Save to Device -->
+                <Button Grid.Column="5" Command="{Binding SaveToDeviceCommand}"
+                        Style="{StaticResource SuccessButtonStyle}"
+                        Padding="18,8"
+                        ToolTip="{Binding SaveToDeviceToolTip}">
+                    <TextBlock Text="Save to Device" FontSize="13"/>
+                </Button>
+
+                <!-- Status: Connected | Configured | Dirty/Saved -->
+                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="6"
+                           Text="{Binding FittingStatusText}" FontSize="11"
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           Margin="0,6,0,0"/>
+            </Grid>
+        </Border>
+
+        <!-- ===== ROW 2: Error Banner ===== -->
+        <Border Grid.Row="2" Margin="0,0,0,8" Padding="14,10"
+                Background="#FEE2E2" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="6"
+                Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding ErrorMessage}" TextWrapping="Wrap"
+                           Foreground="#991B1B" FontSize="13" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Command="{Binding RefreshReadCommand}"
+                        Visibility="{Binding ShowRetryInErrorBanner, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Padding="10,5" Margin="12,0,0,0" Content="Retry"/>
+            </Grid>
+        </Border>
+
+        <!-- ===== ROW 3: Tab Strip + Search ===== -->
+        <Grid Grid.Row="3" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="220"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Tab buttons -->
+            <ItemsControl Grid.Column="0" ItemsSource="{Binding Tabs}" Margin="0,0,12,0">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Command="{Binding DataContext.SelectTabCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding Id}"
+                                Margin="0,0,6,6" Padding="12,7">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource CategoryTabButtonStyle}">
+                                    <Style.Triggers>
+                                        <DataTrigger Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{StaticResource TabIdEqualsConverter}">
+                                                    <Binding Path="Id"/>
+                                                    <Binding Path="DataContext.SelectedTabId" RelativeSource="{RelativeSource AncestorType=UserControl}"/>
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+                                            <Setter Property="Foreground" Value="{StaticResource WhiteBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <TextBlock Text="{Binding Title}" FontSize="13"/>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- Search box -->
+            <Border Grid.Column="1" Background="{StaticResource WhiteBrush}"
+                    BorderBrush="{StaticResource Gray200Brush}" BorderThickness="1" CornerRadius="6"
+                    Padding="10,0" VerticalAlignment="Top" Height="34">
+                <Grid>
+                    <TextBlock Text="Search parameters..." FontSize="13"
+                               Foreground="{StaticResource Gray400Brush}" VerticalAlignment="Center"
+                               IsHitTestVisible="False">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SearchText}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                             Background="Transparent" BorderThickness="0"
+                             VerticalContentAlignment="Center" FontSize="13" Padding="0"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ===== ROW 4: Content — Left and/or Right Ear parameter lists ===== -->
+        <Grid Grid.Row="4">
+            <!-- Loading overlay: semi-transparent backdrop + centered card for any download/read/save -->
+            <Grid Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}"
+                  Panel.ZIndex="10">
+                <Border Background="{StaticResource LoadingOverlayBrush}" CornerRadius="8"/>
+                <Border Style="{StaticResource LoadingOverlayCardStyle}"
+                        VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <StackPanel>
+                        <ProgressBar Style="{StaticResource LoadingIndeterminateProgressBarStyle}"/>
+                        <TextBlock Text="{Binding LoadingMessage}" Style="{StaticResource LoadingMessageStyle}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Content panels -->
+            <Grid Visibility="{Binding IsLoading, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- ===== LEFT EAR PANEL ===== -->
+                <!-- Spans all 3 columns when right card is hidden (full width mode) -->
+                <Border Grid.Column="0" CornerRadius="8" Background="{StaticResource WhiteBrush}"
+                        BorderBrush="{StaticResource Gray200Brush}" BorderThickness="1"
+                        Visibility="{Binding ShowLeftCard, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Grid.ColumnSpan" Value="1"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ShowRightCard}" Value="False">
+                                    <Setter Property="Grid.ColumnSpan" Value="3"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <DockPanel>
+                        <!-- Panel header -->
+                        <Border DockPanel.Dock="Top" Padding="16,12,16,10"
+                                BorderBrush="{StaticResource Gray200Brush}" BorderThickness="0,0,0,1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Left Ear" FontWeight="SemiBold" FontSize="16"
+                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    <TextBlock Text="{Binding SelectedMemoryName, Mode=OneWay}"
+                                               FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0"/>
+                                </StackPanel>
+                                <Border Grid.Column="1" Background="{StaticResource Gray100Brush}"
+                                        CornerRadius="10" Padding="8,3" VerticalAlignment="Center">
+                                    <TextBlock FontSize="11" Foreground="{StaticResource Gray600Brush}">
+                                        <Run Text="{Binding LeftGroups.Count, Mode=OneWay}"/>
+                                        <Run Text=" groups"/>
+                                    </TextBlock>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Lazy groups: one Expander per group; rows loaded when expanded -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding LeftGroups}"
+                                          ItemTemplate="{StaticResource LeftGroupTemplate}"
+                                          BorderThickness="0" Background="Transparent"/>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+
+                <!-- ===== RIGHT EAR PANEL ===== -->
+                <Border Grid.Column="2" CornerRadius="8" Background="{StaticResource WhiteBrush}"
+                        BorderBrush="{StaticResource Gray200Brush}" BorderThickness="1"
+                        Visibility="{Binding ShowRightCard, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <DockPanel>
+                        <!-- Panel header -->
+                        <Border DockPanel.Dock="Top" Padding="16,12,16,10"
+                                BorderBrush="{StaticResource Gray200Brush}" BorderThickness="0,0,0,1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Right Ear" FontWeight="SemiBold" FontSize="16"
+                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    <TextBlock Text="{Binding SelectedMemoryName, Mode=OneWay}"
+                                               FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0"/>
+                                </StackPanel>
+                                <Border Grid.Column="1" Background="{StaticResource Gray100Brush}"
+                                        CornerRadius="10" Padding="8,3" VerticalAlignment="Center">
+                                    <TextBlock FontSize="11" Foreground="{StaticResource Gray600Brush}">
+                                        <Run Text="{Binding RightGroups.Count, Mode=OneWay}"/>
+                                        <Run Text=" groups"/>
+                                    </TextBlock>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Lazy groups: one Expander per group; rows loaded when expanded -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding RightGroups}"
+                                          ItemTemplate="{StaticResource RightGroupTemplate}"
+                                          BorderThickness="0" Background="Transparent"/>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

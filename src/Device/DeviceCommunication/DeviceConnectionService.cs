@@ -12,10 +12,18 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         private readonly SdkManager _sdkManager;
         private ICommunicationAdaptor? _leftConnection;
         private ICommunicationAdaptor? _rightConnection;
+        private bool _leftConfigured;
+        private bool _rightConfigured;
 
         public DeviceConnectionService(SdkManager sdkManager)
         {
             _sdkManager = sdkManager ?? throw new ArgumentNullException(nameof(sdkManager));
+        }
+
+        /// <summary>True if the side was successfully initialized (EndInitializeDevice returned true). Read/Write must only run when configured.</summary>
+        public bool IsSideConfigured(DeviceSide side)
+        {
+            return side == DeviceSide.Left ? _leftConfigured : _rightConfigured;
         }
 
         public bool IsConnected(DeviceSide side)
@@ -24,6 +32,12 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             if (connection == null) return false;
             try { return connection.CheckDevice(); }
             catch { return false; }
+        }
+
+        /// <summary>Returns the communication adaptor for the given side for fitting read/write. Null if not connected.</summary>
+        public ICommunicationAdaptor? GetConnection(DeviceSide side)
+        {
+            return side == DeviceSide.Left ? _leftConnection : _rightConnection;
         }
 
         /// <summary>
@@ -134,6 +148,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
 
                             initMonitor.GetResult(); // throws on error
                             var isConfigured = product.EndInitializeDevice(initMonitor);
+                            if (side == DeviceSide.Left) _leftConfigured = isConfigured;
+                            else _rightConfigured = isConfigured;
                             Debug.WriteLine($"Device init on {side}: configured={isConfigured}");
                         }
                     }
@@ -141,6 +157,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     catch (Exception ex)
                     {
                         Debug.WriteLine($"Device init warning on {side}: {ex.Message}");
+                        if (side == DeviceSide.Left) _leftConfigured = false;
+                        else _rightConfigured = false;
                         // Continue - connection is still valid even if init fails
                     }
                 }
@@ -170,6 +188,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             }
             catch (Exception ex)
             {
+                if (ScanDiagnostics.IsSdException(ex))
+                    ScanDiagnostics.LogSdExceptionDetails(null, ex);
                 CleanupConnection(side, commAdaptor);
                 throw new InvalidOperationException($"Failed to connect to {side} device: {ex.Message}", ex);
             }
@@ -177,8 +197,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
 
         private void CleanupConnection(DeviceSide side, ICommunicationAdaptor? adaptor)
         {
-            if (side == DeviceSide.Left) _leftConnection = null;
-            else _rightConnection = null;
+            if (side == DeviceSide.Left) { _leftConnection = null; _leftConfigured = false; }
+            else { _rightConnection = null; _rightConfigured = false; }
             try { adaptor?.CloseDevice(); }
             catch { /* ignore */ }
         }
@@ -192,8 +212,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 catch { /* ignore */ }
                 finally
                 {
-                    if (side == DeviceSide.Left) _leftConnection = null;
-                    else _rightConnection = null;
+                    if (side == DeviceSide.Left) { _leftConnection = null; _leftConfigured = false; }
+                    else { _rightConnection = null; _rightConfigured = false; }
                 }
             }
             return Task.CompletedTask;
@@ -201,14 +221,13 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
 
         public void Cleanup()
         {
-            // Close each connection independently
             try { _leftConnection?.CloseDevice(); }
             catch { /* ignore */ }
-            finally { _leftConnection = null; }
+            finally { _leftConnection = null; _leftConfigured = false; }
 
             try { _rightConnection?.CloseDevice(); }
             catch { /* ignore */ }
-            finally { _rightConnection = null; }
+            finally { _rightConnection = null; _rightConfigured = false; }
         }
     }
 }

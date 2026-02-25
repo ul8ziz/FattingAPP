@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <PlatformTarget>x86</PlatformTarget>
     <Prefer32Bit>true</Prefer32Bit>
     <Nullable>enable</Nullable>
@@ -10,6 +10,7 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Platforms>AnyCPU;x86</Platforms>
   </PropertyGroup>
   
   <PropertyGroup>
@@ -25,22 +26,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Copy all SDK DLLs to output -->
+    <!-- Copy SDK runtime DLLs to output (sdnet.dll and dependencies) -->
     <None Include="..\Libs\*.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <!-- Copy SDCOM manifest -->
-    <None Include="..\Libs\SDCOM.dll.manifest">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <!-- Copy SDK config -->
-    <None Include="..\Libs\sd.config">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <!-- Copy product library file -->
-    <None Include="..\Libs\E7160SL.library">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <!-- sd.config, *.library, and SDCOM.dll.manifest are now copied by the App project
+         into Assets\SoundDesigner\ subfolder. See App\Ul8ziz.FittingApp.App.csproj. -->
     <!-- Copy RSL10 wireless DLLs to rsl10 subfolder -->
     <None Include="..\Libs\rsl10\*.*">
       <Link>rsl10\%(Filename)%(Extension)</Link>
