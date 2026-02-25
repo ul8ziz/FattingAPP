@@ -22,16 +22,8 @@ namespace Ul8ziz.FittingApp.App.Services
         private string? _rightModelName;
         private string? _rightFirmwareId;
         private string? _rightSerialId;
-        private bool _requestRestartDiscovery;
 
         private AppSessionState() { }
-
-        /// <summary>When true, Connect view should start wired discovery after a short debounce (e.g. after session end).</summary>
-        public bool RequestRestartDiscovery
-        {
-            get => _requestRestartDiscovery;
-            set { _requestRestartDiscovery = value; OnPropertyChanged(); }
-        }
 
         public ConnectionState ConnectionState
         {
