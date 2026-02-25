@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <PlatformTarget>x86</PlatformTarget>
     <Prefer32Bit>true</Prefer32Bit>
     <Nullable>enable</Nullable>
@@ -13,14 +13,110 @@
     <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
     <PublishTrimmed>false</PublishTrimmed>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- Enforce x86 output so HI-PRO/FTDI vendor DLLs (x86) load correctly. Optional for publish: RuntimeIdentifier=win-x86 -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' And '$(SelfContained)' == 'true'">win-x86</RuntimeIdentifier>
+    <Platforms>AnyCPU;x86</Platforms>
   </PropertyGroup>
 
   <ItemGroup>
     <Resource Include="Resources\Images\AppLogo.png" />
+    <Resource Include="Resources\Images\AppIcon.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Graph parameter mapping (per product) - copy to output so GraphParameterMappingService finds it -->
+  <ItemGroup>
+    <Content Include="Assets\GraphParameterMap.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Sound Designer SDK assets: libraries, config, param files.
+       Source: src\App\Assets\SoundDesigner\  (checked into repo)
+       Output: bin\Assets\SoundDesigner\      (at runtime)
+       All runtime paths resolve relative to AppContext.BaseDirectory — no external absolute paths. -->
+  <ItemGroup>
+    <!-- sd.config (SDK configuration) - Copy to BOTH Assets/SoundDesigner AND Root for robustness -->
+    <Content Include="Assets\SoundDesigner\sd.config">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="Assets\SoundDesigner\sd.config">
+      <Link>sd.config</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <!-- Product library files (*.library) — automatically include all libraries in the products folder -->
+    <Content Include="Assets\SoundDesigner\products\**\*.library">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <!-- Product param files (*.param) — automatically include all param files in the products folder -->
+    <Content Include="Assets\SoundDesigner\products\**\*.param">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <!-- SDCOM manifest (required by SDK runtime — stays at output root) -->
+    <Content Include="..\Device\Libs\SDCOM.dll.manifest">
+      <Link>SDCOM.dll.manifest</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Native DLLs (HI-PRO/FTDI x86): repo-local NativeDeps\HI-PRO. Copied to $(TargetDir) on build and publish. -->
+  <ItemGroup Condition="'$(Platform)' == 'x86'">
+    <Content Include="NativeDeps\HI-PRO\ftd2xx.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Link>ftd2xx.dll</Link>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="NativeDeps\HI-PRO\FTD2XX_NET.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Link>FTD2XX_NET.dll</Link>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="NativeDeps\HI-PRO\HiProWrapper.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Link>HiProWrapper.dll</Link>
+      <Visible>false</Visible>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Device\DeviceCommunication\DeviceCommunication.csproj" />
+    <Reference Include="sdnet">
+      <HintPath>..\Device\Libs\sdnet.dll</HintPath>
+    </Reference>
+    <Reference Include="FTD2XX_NET">
+      <HintPath>NativeDeps\HI-PRO\FTD2XX_NET.dll</HintPath>
+    </Reference>
+    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.2" />
   </ItemGroup>
+
+  <!-- When building for non-x86, warn and do not copy x86 native DLLs. -->
+  <Target Name="WarnNonX86Hipro" AfterTargets="Build" Condition="'$(Platform)' != 'x86'">
+    <Warning Text="Platform is $(Platform). HI-PRO/FTDI x86 DLLs were NOT copied. Build with -p:Platform=x86 for the executable that loads them." />
+  </Target>
+
+  <!-- Verify native DLLs exist in $(TargetDir) after Build. Fail with clear error listing missing files. -->
+  <Target Name="VerifyNativeDeps" AfterTargets="Build" Condition="'$(Platform)' == 'x86'">
+    <ItemGroup>
+      <_RequiredNative Include="ftd2xx.dll" />
+      <_RequiredNative Include="FTD2XX_NET.dll" />
+      <_RequiredNative Include="HiProWrapper.dll" />
+      <_MissingNative Include="%(_RequiredNative.Identity)" Condition="!Exists('$(TargetDir)%(_RequiredNative.Identity)')" />
+    </ItemGroup>
+    <Error Condition="'@(_MissingNative)' != ''"
+           Text="Missing native dependency in $(TargetDir):&#x0A;  @(_MissingNative, '&#x0A;  ')&#x0A;Copy ftd2xx.dll, FTD2XX_NET.dll, HiProWrapper.dll from HI-PRO install into src\App\NativeDeps\HI-PRO\ then rebuild." />
+  </Target>
 
 </Project>

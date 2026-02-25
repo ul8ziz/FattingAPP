@@ -1,0 +1,64 @@
+<Window x:Class="Ul8ziz.FittingApp.App.Views.EndSessionDialogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="End Session"
+        SizeToContent="WidthAndHeight"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        MinWidth="420"
+        MaxWidth="520"
+        Background="{StaticResource BackgroundBrush}"
+        Loaded="Window_Loaded">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../Styles/Styles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <StackPanel Margin="24,20,24,24">
+        <TextBlock Text="{Binding Title}" 
+                   Style="{StaticResource Heading2Style}" 
+                   Margin="0,0,0,12"/>
+        <TextBlock Text="{Binding Message}" 
+                   TextWrapping="Wrap" 
+                   FontSize="14" 
+                   Foreground="{StaticResource TextPrimaryBrush}"
+                   Margin="0,0,0,8"/>
+        <TextBlock Text="{Binding ConnectedDeviceNotice}" 
+                   TextWrapping="Wrap" 
+                   FontSize="12" 
+                   Foreground="{StaticResource TextSecondaryBrush}"
+                   Margin="0,0,0,20">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding ShowConnectedDeviceNotice}" Value="True">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Command="{Binding SaveAndEndCommand}" 
+                    Style="{StaticResource SuccessButtonStyle}" 
+                    Padding="16,10" 
+                    Margin="0,0,8,0"
+                    Content="Save to Device &amp; End"/>
+            <Button Command="{Binding EndWithoutSavingCommand}" 
+                    Style="{StaticResource SecondaryButtonStyle}" 
+                    Padding="16,10" 
+                    Margin="0,0,8,0"
+                    Content="End Without Saving"/>
+            <Button Command="{Binding CancelCommand}" 
+                    Style="{StaticResource SecondaryButtonStyle}" 
+                    Padding="16,10"
+                    Content="Cancel"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

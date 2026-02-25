@@ -12,10 +12,16 @@ App/
 ├── MainWindow.xaml.cs
 ├── Program.cs               # Application entry point
 ├── Styles/
-│   └── Styles.xaml          # ResourceDictionary with all styles
+│   ├── Styles.xaml          # Global ResourceDictionary (colors, typography, buttons, cards)
+│   └── ParameterFieldStyles.xaml  # Parameter field card, ComboBox, Slider, Toggle, unit badge
 ├── Views/
+│   ├── Controls/
+│   │   ├── ParameterFieldCard.xaml   # Reusable parameter row (title, description, value, unit, reset)
+│   │   └── ParameterFieldCard.xaml.cs
 │   ├── MainView.xaml        # Main view with TopBar and Sidebar
-│   └── MainView.xaml.cs
+│   ├── MainView.xaml.cs
+│   ├── FittingView.xaml     # Fitting page with tabs and parameter lists
+│   └── ...
 └── Properties/
     └── AssemblyInfo.cs
 ```

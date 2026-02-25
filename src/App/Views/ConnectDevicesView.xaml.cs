@@ -5,17 +5,17 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 using Ul8ziz.FittingApp.Device.DeviceCommunication;
 using Ul8ziz.FittingApp.Device.DeviceCommunication.Models;
 using Ul8ziz.FittingApp.App.Helpers;
+using Ul8ziz.FittingApp.App.DeviceCommunication.HiProD2xx;
+using Ul8ziz.FittingApp.App.Services;
 
 namespace Ul8ziz.FittingApp.App.Views
 {
@@ -40,6 +40,8 @@ namespace Ul8ziz.FittingApp.App.Views
         private string _connectionStatusMessage = string.Empty;
         private bool _isConnected;
 
+        private string? _lastSdkError;
+
         // SDK Services
         private SdkManager? _sdkManager;
         private ProgrammerScanner? _programmerScanner;
@@ -47,6 +49,38 @@ namespace Ul8ziz.FittingApp.App.Views
         private DeviceConnectionService? _deviceConnectionService;
         private ProgrammerInfo? _selectedProgrammerInfo;
         private CancellationTokenSource? _cancellationTokenSource;
+
+        // Library Selection
+        private ObservableCollection<LibraryInfo> _availableLibraries = new ObservableCollection<LibraryInfo>();
+        public ObservableCollection<LibraryInfo> AvailableLibraries
+        {
+            get => _availableLibraries;
+            set { _availableLibraries = value; OnPropertyChanged(); }
+        }
+
+        private LibraryInfo? _selectedLibrary;
+        public LibraryInfo? SelectedLibrary
+        {
+            get => _selectedLibrary;
+            set
+            {
+                if (_selectedLibrary != value)
+                {
+                    _selectedLibrary = value;
+                    OnPropertyChanged();
+                    if (_selectedLibrary != null)
+                    {
+                        _ = LoadDefaultLibraryAsync(_selectedLibrary.FullPath);
+                    }
+                }
+            }
+        }
+
+        // D2XX-first: HI-PRO via FTDI D2XX (no COM/CTK for wired scan)
+        private readonly HiProService _hiProService = new HiProService();
+
+        /// <summary>Invoked when connection to device(s) succeeds. Set by shell to auto-navigate to Fitting.</summary>
+        public Action? OnConnectionSucceeded { get; set; }
 
         public ConnectDevicesView()
         {
@@ -56,49 +90,70 @@ namespace Ul8ziz.FittingApp.App.Views
             // SDK init is deferred to first scan to avoid constructor crash
         }
 
-        /// <summary>
-        /// Lazily initializes SDK services. Called before first scan.
-        /// Never throws - sets _sdkManager to null on failure.
-        /// </summary>
-        private string? _lastSdkError;
-        
-        private void InitializeSdkServices()
+        private void UserControl_Loaded(object sender, RoutedEventArgs e)
         {
+            if (AvailableLibraries.Count == 0)
+            {
+                // Do not init if session is active or teardown is in progress
+                if (DeviceSessionService.Instance.HasActiveSession || SdkLifecycle.IsDisposingOrDisposed)
+                {
+                    System.Diagnostics.Debug.WriteLine("[ConnectDevices] Loaded: skip SDK init (active session or teardown)");
+                    return;
+                }
+                Dispatcher.BeginInvoke(new Action(async () => await InitializeSdkServicesAsync()), DispatcherPriority.Background);
+            }
+        }
+
+        /// <summary>
+        /// Lazily initializes SDK services using the single shared SdkManager from DeviceSessionService.
+        /// Skips if session is active or lifecycle is Disposing/Disposed. Never creates ProductManager outside SdkManager.
+        /// </summary>
+        private async Task InitializeSdkServicesAsync()
+        {
+            if (SdkLifecycle.IsDisposingOrDisposed || DeviceSessionService.Instance.HasActiveSession)
+            {
+                System.Diagnostics.Debug.WriteLine("[ConnectDevices] InitializeSdkServicesAsync skipped (teardown or active session)");
+                return;
+            }
             if (_sdkManager?.IsInitialized == true)
-                return; // Already initialized
+                return;
 
             _lastSdkError = null;
 
             try
             {
-                System.Diagnostics.Debug.WriteLine("=== Initializing SDK services ===");
-                System.Diagnostics.Debug.WriteLine($"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
-                System.Diagnostics.Debug.WriteLine($"Environment.Version: {Environment.Version}");
-                System.Diagnostics.Debug.WriteLine($"AppContext.TargetFrameworkName: {AppContext.TargetFrameworkName}");
-                System.Diagnostics.Debug.WriteLine($"App Base Dir: {AppDomain.CurrentDomain.BaseDirectory}");
-                System.Diagnostics.Debug.WriteLine($"Library Path: {SdkConfiguration.GetLibraryPath()}");
-                System.Diagnostics.Debug.WriteLine($"Config Path: {SdkConfiguration.GetConfigPath()}");
-                
-                _sdkManager = new SdkManager();
-                _sdkManager.Initialize();
-                
+                System.Diagnostics.Debug.WriteLine("=== Initializing SDK services (shared SdkManager) ===");
+                var libraryPath = SdkConfiguration.GetLibraryPath();
+                var configPath = SdkConfiguration.GetConfigPath();
+                System.Diagnostics.Debug.WriteLine($"Library Path: {libraryPath}");
+                System.Diagnostics.Debug.WriteLine($"Config Path: {configPath}");
+
+                // Enumerate libraries (no SDK required)
+                var availableLibraries = LibraryService.EnumerateLibraries();
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    AvailableLibraries.Clear();
+                    foreach (var lib in availableLibraries)
+                        AvailableLibraries.Add(lib);
+                    if (AvailableLibraries.Count > 0 && SelectedLibrary == null)
+                        SelectedLibrary = AvailableLibraries[0];
+                });
+
+                // Single SdkManager: create/init via gate from DeviceSessionService
+                var sdkManager = await DeviceSessionService.Instance.EnsureSdkReadyForScanAsync(libraryPath).ConfigureAwait(true);
+                _sdkManager = sdkManager;
                 _programmerScanner = new ProgrammerScanner(_sdkManager);
                 _deviceDiscoveryService = new DeviceDiscoveryService(_sdkManager);
                 _deviceConnectionService = new DeviceConnectionService(_sdkManager);
-                
-                System.Diagnostics.Debug.WriteLine("=== SDK services initialized successfully ===");
+
+                System.Diagnostics.Debug.WriteLine("=== SDK services initialized (shared SdkManager) ===");
             }
             catch (Exception ex)
             {
-                // Build detailed error message including inner exceptions
                 var errorDetail = ex.Message;
                 if (ex.InnerException != null)
                     errorDetail += $"\nCause: {ex.InnerException.Message}";
-                
-                System.Diagnostics.Debug.WriteLine($"=== SDK initialization FAILED ===");
-                System.Diagnostics.Debug.WriteLine($"Error: {errorDetail}");
-                System.Diagnostics.Debug.WriteLine($"Stack: {ex.StackTrace}");
-                
+                System.Diagnostics.Debug.WriteLine($"=== SDK initialization FAILED ===\n{errorDetail}");
                 _lastSdkError = errorDetail;
                 _sdkManager = null;
                 _programmerScanner = null;
@@ -107,29 +162,70 @@ namespace Ul8ziz.FittingApp.App.Views
             }
         }
 
+        /// <summary>Loads the default library into FittingSessionManager for offline parameter browsing.
+        /// Also auto-loads the matching .param file if available (e.g., E7111V2.param for E7111V2.library).</summary>
+        private async Task LoadDefaultLibraryAsync(string libraryPath)
+        {
+            try
+            {
+                await FittingSessionManager.Instance.CreateOfflineSessionAsync(libraryPath);
+                System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Default library loaded for offline browsing: {System.IO.Path.GetFileName(libraryPath)}");
+
+                // Auto-load matching .param file (e.g., E7111V2.param for E7111V2.library)
+                var libraryFileName = System.IO.Path.GetFileName(libraryPath);
+                var paramPath = ParamFileService.FindParamForLibrary(libraryFileName);
+                if (paramPath != null)
+                {
+                    try
+                    {
+                        await FittingSessionManager.Instance.ApplyParamFileAsync(paramPath);
+                        System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Auto-loaded .param: {System.IO.Path.GetFileName(paramPath)}");
+                        OnPropertyChanged(nameof(ParamFileStatus));
+                    }
+                    catch (Exception paramEx)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Failed to auto-load .param: {paramEx.Message}");
+                    }
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[ConnectDevices] No matching .param file found for {libraryFileName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Failed to load default library: {ex.Message}");
+            }
+        }
+
+        /// <summary>Status text showing loaded .param file name (for UI display).</summary>
+        public string ParamFileStatus => FittingSessionManager.Instance.ParamFileName != null
+            ? $"Preset: {FittingSessionManager.Instance.ParamFileName}"
+            : "No preset loaded";
+
         // Properties
         public bool IsSearching
         {
             get => _isSearching;
-            set { _isSearching = value; OnPropertyChanged(); }
+            set { _isSearching = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusBarText)); }
         }
 
         public bool HasFoundProgrammers
         {
             get => _hasFoundProgrammers;
-            set { _hasFoundProgrammers = value; OnPropertyChanged(); }
+            set { _hasFoundProgrammers = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusBarText)); }
         }
 
         public string FoundProgrammersMessage
         {
             get => _foundProgrammersMessage;
-            set { _foundProgrammersMessage = value; OnPropertyChanged(); }
+            set { _foundProgrammersMessage = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusBarText)); }
         }
 
         public bool ScanCompleted
         {
             get => _scanCompleted;
-            set { _scanCompleted = value; OnPropertyChanged(); }
+            set { _scanCompleted = value; OnPropertyChanged(); OnPropertyChanged(nameof(ScanFoundNothing)); OnPropertyChanged(nameof(StatusBarText)); }
         }
 
         /// <summary>True when scan finished but found nothing</summary>
@@ -172,7 +268,7 @@ namespace Ul8ziz.FittingApp.App.Views
         public bool IsDiscovering
         {
             get => _isDiscovering;
-            set { _isDiscovering = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanDiscover)); }
+            set { _isDiscovering = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanDiscover)); OnPropertyChanged(nameof(StatusText)); }
         }
 
         public double DiscoveryProgress
@@ -190,8 +286,11 @@ namespace Ul8ziz.FittingApp.App.Views
         public string FoundDevicesMessage
         {
             get => _foundDevicesMessage;
-            set { _foundDevicesMessage = value; OnPropertyChanged(); }
+            set { _foundDevicesMessage = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusText)); }
         }
+
+        /// <summary>Single status line for merged Discover & Connect: Idle / Scanning / Completed.</summary>
+        public string StatusText => IsDiscovering ? "Searching for devices…" : (string.IsNullOrEmpty(_foundDevicesMessage) ? "Ready to scan." : _foundDevicesMessage);
 
         private ObservableCollection<HearingAidViewModel> _devices = new ObservableCollection<HearingAidViewModel>();
         public ObservableCollection<HearingAidViewModel> Devices
@@ -204,19 +303,57 @@ namespace Ul8ziz.FittingApp.App.Views
         public HearingAidViewModel? LeftDevice
         {
             get => _leftDevice;
-            set { _leftDevice = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasDevices)); OnPropertyChanged(nameof(SelectedDevicesCount)); OnPropertyChanged(nameof(CanConnect)); }
+            set { _leftDevice = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasDevices)); OnPropertyChanged(nameof(ShowLeftDevice)); OnPropertyChanged(nameof(SelectedDevicesCount)); OnPropertyChanged(nameof(SelectedDevicesSummary)); OnPropertyChanged(nameof(CanConnect)); }
         }
 
         private HearingAidViewModel? _rightDevice;
         public HearingAidViewModel? RightDevice
         {
             get => _rightDevice;
-            set { _rightDevice = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasDevices)); OnPropertyChanged(nameof(SelectedDevicesCount)); OnPropertyChanged(nameof(CanConnect)); }
+            set { _rightDevice = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasDevices)); OnPropertyChanged(nameof(ShowRightDevice)); OnPropertyChanged(nameof(SelectedDevicesCount)); OnPropertyChanged(nameof(SelectedDevicesSummary)); OnPropertyChanged(nameof(CanConnect)); }
         }
 
         public bool HasDevices => LeftDevice != null || RightDevice != null;
 
+        /// <summary>Syncs the Devices list from LeftDevice/RightDevice (detected only). Used by merged Discover & Connect UI.</summary>
+        private void SyncDevicesCollection()
+        {
+            Devices.Clear();
+            if (LeftDevice != null) Devices.Add(LeftDevice);
+            if (RightDevice != null) Devices.Add(RightDevice);
+        }
+
         public int SelectedDevicesCount => (LeftDevice?.IsSelected == true ? 1 : 0) + (RightDevice?.IsSelected == true ? 1 : 0);
+
+        /// <summary>Summary text for footer, e.g. "Selected: Left (1)".</summary>
+        public string SelectedDevicesSummary
+        {
+            get
+            {
+                if (SelectedDevicesCount == 0) return "No devices selected";
+                var parts = new List<string>();
+                if (LeftDevice?.IsSelected == true) parts.Add("Left");
+                if (RightDevice?.IsSelected == true) parts.Add("Right");
+                return $"Selected: {string.Join(", ", parts)} ({SelectedDevicesCount})";
+            }
+        }
+
+        /// <summary>Status bar text when programmer is found (reference: "HI-PRO Found | USB OK | Driver OK").</summary>
+        public string StatusBarText
+        {
+            get
+            {
+                if (IsSearching) return "Searching...";
+                if (ScanFoundNothing) return FoundProgrammersMessage;
+                if (HasFoundProgrammers)
+                {
+                    var name = SelectedProgrammerName;
+                    if (string.IsNullOrEmpty(name)) name = "Programmer";
+                    return $"{name} Found | USB OK | Driver OK";
+                }
+                return "Scan and select a programmer to begin";
+            }
+        }
 
         public bool CanConnect => SelectedDevicesCount > 0 && !IsConnecting && !IsConnected;
 
@@ -244,7 +381,31 @@ namespace Ul8ziz.FittingApp.App.Views
             set { _isConnected = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanConnect)); }
         }
 
+        /// <summary>True when Left ear was detected and card should be shown.</summary>
+        public bool ShowLeftDevice => LeftDevice != null;
+        /// <summary>True when Right ear was detected and card should be shown.</summary>
+        public bool ShowRightDevice => RightDevice != null;
+
         private enum ScanKind { Wired, Wireless }
+
+        /// <summary>Resets connection UI state so the view shows "connection inactive" and allows headset selection (e.g. after session end or save failure).</summary>
+        public void ResetForInactiveConnection()
+        {
+            IsConnected = false;
+            OnPropertyChanged(nameof(CanConnect));
+        }
+
+        /// <summary>Called after session end when navigating back to Connect. Starts wired discovery after 500ms debounce.</summary>
+        public void StartWiredDiscoveryAfterDebounce()
+        {
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                RunScanAsync(ScanKind.Wired);
+            };
+            timer.Start();
+        }
 
         // Event Handlers
         private void SearchWiredProgrammers_Click(object sender, RoutedEventArgs e) => RunScanAsync(ScanKind.Wired);
@@ -252,6 +413,11 @@ namespace Ul8ziz.FittingApp.App.Views
 
         private async void RunScanAsync(ScanKind kind)
         {
+            Console.WriteLine("=== PATCH_ACTIVE_MARKER_777 === " + DateTime.Now.ToString("O"));
+            Console.WriteLine("ExePath=" + Environment.ProcessPath);
+            Console.WriteLine("BaseDir=" + AppContext.BaseDirectory);
+            Console.WriteLine("EntryAsm=" + System.Reflection.Assembly.GetEntryAssembly()?.Location);
+            Console.WriteLine("ThisAsm=" + typeof(Ul8ziz.FittingApp.Device.DeviceCommunication.ProgrammerScanner).Assembly.Location);
             System.Diagnostics.Debug.WriteLine($"=== RunScanAsync ({kind}) STARTED ===");
 
             _cancellationTokenSource?.Cancel();
@@ -271,20 +437,43 @@ namespace Ul8ziz.FittingApp.App.Views
                 var progress = new Progress<int>(p => { FoundProgrammersMessage = $"Scanning... {p}%"; });
                 var token = _cancellationTokenSource.Token;
 
-                ProgrammerScanner.ScanResult scanResult;
+                ProgrammerScanner.ScanResult? scanResult = null;
                 if (kind == ScanKind.Wired)
                 {
-                    // All CTK/sdnet calls for wired scan on one dedicated STA thread; use fresh SDK on that thread to avoid E_INVALID_STATE
-                    FoundProgrammersMessage = "Scanning wired (STA)...";
-                    await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
-                    scanResult = StaThreadHelper.RunOnStaThread(() =>
+                    // D2XX-only: no COM/SerialPort, no CTK/sdnet for HI-PRO detection
+                    FoundProgrammersMessage = "Scanning wired (D2XX)...";
+                    var devices = await _hiProService.ListDevicesAsync(token).ConfigureAwait(true);
+                    scanResult = new ProgrammerScanner.ScanResult();
+                    int id = 1;
+                    foreach (var dev in devices)
                     {
-                        SdkConfiguration.SetupEnvironment();
-                        using var sdk = new SdkManager();
-                        sdk.Initialize();
-                        var scanner = new ProgrammerScanner(sdk);
-                        return scanner.ScanWiredOnlySync(progress, token, null);
-                    });
+                        scanResult.FoundProgrammers.Add(new ProgrammerInfo
+                        {
+                            Id = id++,
+                            Name = "HI-PRO",
+                            Type = ProgrammerType.Wired,
+                            InterfaceName = Constants.HiPro,
+                            Port = "D2XX",
+                            SerialNumber = string.IsNullOrEmpty(dev.SerialNumber) ? dev.Description : dev.SerialNumber,
+                            Firmware = "N/A",
+                            IsAvailable = true
+                        });
+                        scanResult.AllAttempts.Add(new ProgrammerScanner.ScanAttemptResult
+                        {
+                            ProgrammerName = Constants.HiPro,
+                            DisplayName = "HI-PRO",
+                            Found = true
+                        });
+                    }
+                    if (devices.Count == 0)
+                        scanResult.AllAttempts.Add(new ProgrammerScanner.ScanAttemptResult
+                        {
+                            ProgrammerName = Constants.HiPro,
+                            DisplayName = "HI-PRO",
+                            Found = false,
+                            ErrorCode = "NOT_CONNECTED",
+                            ErrorMessage = "No D2XX devices found. Connect HI-PRO via USB (D2XX works even if COM port is disabled)."
+                        });
                 }
                 else
                 {
@@ -292,7 +481,7 @@ namespace Ul8ziz.FittingApp.App.Views
                     {
                         FoundProgrammersMessage = "Initializing SDK...";
                         System.Diagnostics.Debug.WriteLine("Initializing SDK...");
-                        InitializeSdkServices();
+                        await InitializeSdkServicesAsync().ConfigureAwait(true);
                         if (_sdkManager == null || !_sdkManager.IsInitialized)
                         {
                             var detail = _lastSdkError ?? "Unknown error";
@@ -308,7 +497,7 @@ namespace Ul8ziz.FittingApp.App.Views
 
                 StopTimeoutTimer();
 
-                var foundProgrammers = scanResult.FoundProgrammers;
+                var foundProgrammers = scanResult!.FoundProgrammers;
                 System.Diagnostics.Debug.WriteLine($"Scan completed. Found {foundProgrammers.Count} programmers");
                     
                 foreach (var programmerInfo in foundProgrammers)
@@ -340,6 +529,17 @@ namespace Ul8ziz.FittingApp.App.Views
                     Programmers.Add(programmerVm);
                 }
 
+                // Auto-select when only one programmer is found so it clearly shows as selected
+                if (foundProgrammers.Count == 1)
+                {
+                    Programmers[0].IsSelected = true;
+                    _selectedProgrammerInfo = foundProgrammers[0];
+                    OnPropertyChanged(nameof(CanDiscover));
+                    OnPropertyChanged(nameof(HasSelectedProgrammer));
+                    OnPropertyChanged(nameof(SelectedProgrammerName));
+                    OnPropertyChanged(nameof(StatusBarText));
+                }
+
                 // Notify UI that the collection changed
                 OnPropertyChanged(nameof(HasProgrammers));
                 OnPropertyChanged(nameof(Programmers));
@@ -356,31 +556,18 @@ namespace Ul8ziz.FittingApp.App.Views
                 else
                 {
                     FoundProgrammersMessage = kind == ScanKind.Wired
-                        ? "No wired programmers found. Connect HI-PRO and try again."
+                        ? "No wired programmers found. Connect HI-PRO via USB and try again. (D2XX works even if COM port is disabled.)"
                         : "No wireless programmers found. Turn on Bluetooth and try again.";
 
-                    var diagnostics = scanResult.GetDiagnosticSummary();
-                    var fullDetail = scanResult.GetFullDiagnosticDetail();
-                    var hasHiproUnknownName = scanResult.AllAttempts.Any(a =>
-                        string.Equals(a.ErrorCode, "E_UNKNOWN_NAME", StringComparison.OrdinalIgnoreCase) &&
-                        (a.ProgrammerName?.Contains("HI-PRO", StringComparison.OrdinalIgnoreCase) ?? false));
-                    var hasHiproNotConnected = scanResult.AllAttempts.Any(a =>
-                        string.Equals(a.ErrorCode, "NOT_CONNECTED", StringComparison.OrdinalIgnoreCase) &&
-                        (a.ProgrammerName?.Contains("HI-PRO", StringComparison.OrdinalIgnoreCase) ?? false));
-                    var ctkInstalled = SdkConfiguration.IsCtkInstalled();
-
+                    var diagnostics = kind == ScanKind.Wired
+                        ? "Wired scan uses D2XX only. Check log.txt in the app folder for details."
+                        : scanResult.GetDiagnosticSummary();
+                    var fullDetail = kind == ScanKind.Wired
+                        ? "D2XX enumeration returned 0 devices. Ensure ftd2xx.dll is in app folder or C:\\Program Files (x86)\\HI-PRO."
+                        : scanResult.GetFullDiagnosticDetail();
                     var pleaseCheck = kind == ScanKind.Wired
-                        ? "Please check:\n• HI-PRO programmer is connected via USB\n• The programmer is powered on\n• Correct drivers are installed"
+                        ? "Please check:\n• HI-PRO is connected via USB\n• ftd2xx.dll and FTD2XX_NET.dll are in app folder or C:\\Program Files (x86)\\HI-PRO\n• Build with Platform=x86 (32-bit)"
                         : "Please check:\n• Bluetooth is on, NOAHlink/RSL10 in range and paired";
-                    if (kind == ScanKind.Wired)
-                    {
-                        if (!ctkInstalled)
-                            pleaseCheck += "\n• CTK Runtime: Install CTKRuntime64.msi from SDK redistribution folder (required for HI-PRO)";
-                        if (hasHiproUnknownName)
-                            pleaseCheck += "\n• HI-PRO: Ensure HI-PRO driver (v4.02+) is installed and \"C:\\Program Files (x86)\\HI-PRO\" is in system PATH; restart the app after changing PATH.";
-                        if (fullDetail.Contains("E_INVALID_STATE", StringComparison.OrdinalIgnoreCase))
-                            pleaseCheck += "\n• HI-PRO (E_INVALID_STATE): Another process is likely using the programmer (e.g. HiProMonitorService, Starkey Inspire). Close them: run \"powershell -ExecutionPolicy Bypass -File scripts\\close-programmer-apps.ps1 -Close\" from the project folder, confirm with Y, then restart this app and click Scan Wired again.";
-                    }
 
                     System.Diagnostics.Debug.WriteLine("=== FULL SCAN DIAGNOSTIC ===");
                     System.Diagnostics.Debug.WriteLine(fullDetail);
@@ -388,7 +575,7 @@ namespace Ul8ziz.FittingApp.App.Views
 
                     var title = kind == ScanKind.Wired ? "No Wired Programmers Found" : "No Wireless Programmers Found";
                     MessageBox.Show(
-                        $"No {(kind == ScanKind.Wired ? "wired" : "wireless")} programmers were detected.\n\nScan Results:\n{diagnostics}\n\nTechnical Details:\n{fullDetail}\n\n{pleaseCheck}",
+                        $"No {(kind == ScanKind.Wired ? "wired" : "wireless")} programmers were detected.\n\n{diagnostics}\n\n{pleaseCheck}",
                         title,
                         MessageBoxButton.OK,
                         MessageBoxImage.Warning);
@@ -451,6 +638,7 @@ namespace Ul8ziz.FittingApp.App.Views
                 OnPropertyChanged(nameof(CanDiscover));
                 OnPropertyChanged(nameof(HasSelectedProgrammer));
                 OnPropertyChanged(nameof(SelectedProgrammerName));
+                OnPropertyChanged(nameof(StatusBarText));
 
                 // Auto-discover hearing aids when a programmer is selected
                 await DiscoverHearingAidsAsync();
@@ -460,6 +648,11 @@ namespace Ul8ziz.FittingApp.App.Views
         private async void DiscoverDevices_Click(object sender, RoutedEventArgs e)
         {
             await DiscoverHearingAidsAsync();
+        }
+
+        private void StopDiscovery_Click(object sender, RoutedEventArgs e)
+        {
+            _cancellationTokenSource?.Cancel();
         }
 
         /// <summary>
@@ -484,32 +677,108 @@ namespace Ul8ziz.FittingApp.App.Views
             FoundDevicesMessage = $"Discovering hearing aids via {_selectedProgrammerInfo.Name}...";
             LeftDevice = null;
             RightDevice = null;
+            SyncDevicesCollection();
             OnPropertyChanged(nameof(HasDevices));
             OnPropertyChanged(nameof(CanConnect));
 
             try
             {
-                // Cancel any previous operation
                 _cancellationTokenSource?.Cancel();
                 _cancellationTokenSource?.Dispose();
                 _cancellationTokenSource = new CancellationTokenSource();
+                var ct = _cancellationTokenSource.Token;
 
-                if (_deviceDiscoveryService == null)
-                    throw new InvalidOperationException("Device discovery service not available.");
+                DeviceInfo? leftDeviceInfo = null;
+                DeviceInfo? rightDeviceInfo = null;
 
-                var progress = new Progress<int>(p =>
+                bool isWiredHipro = _selectedProgrammerInfo.Type == ProgrammerType.Wired
+                    && (string.Equals(_selectedProgrammerInfo.InterfaceName, Constants.HiPro, StringComparison.OrdinalIgnoreCase) || _selectedProgrammerInfo.Port == "D2XX");
+
+                if (isWiredHipro)
                 {
-                    DiscoveryProgress = p;
-                    FoundDevicesMessage = $"Discovering hearing aids... {p}%";
-                });
+                    await InitializeSdkServicesAsync().ConfigureAwait(true);
+                    if (_sdkManager == null || !_sdkManager.IsInitialized)
+                    {
+                        var msg = string.IsNullOrEmpty(_lastSdkError)
+                            ? "SDK could not be initialized. Check sd.config, library file, and CTK Runtime (x86)."
+                            : "SDK initialization failed: " + _lastSdkError;
+                        throw new InvalidOperationException(msg);
+                    }
 
-                // Discover both sides
-                var (leftDeviceInfo, rightDeviceInfo) = await _deviceDiscoveryService.DiscoverBothDevicesAsync(
-                    _selectedProgrammerInfo,
-                    progress,
-                    _cancellationTokenSource.Token);
+                    // Wired HI-PRO: HiProWiredDiscoveryService per Programmer's Guide (SDK only; no COM/SerialPort).
+                    // Returns IReadOnlyList<DiscoveredDevice> [Left, Right]; partial success allowed.
+                    await _hiProService.DisconnectAsync(ct).ConfigureAwait(true);
+                    var d2xxSummary = D2xxLoader.GetDiagnosticsSummary();
+                    System.Diagnostics.Debug.WriteLine(d2xxSummary);
+                    ScanDiagnostics.WriteLine(d2xxSummary);
+                    try
+                    {
+                        var d2xxDevices = await _hiProService.ListDevicesAsync(ct).ConfigureAwait(true);
+                        ScanDiagnostics.WriteLine($"[D2XX] Device count: {d2xxDevices.Count}");
+                        foreach (var d in d2xxDevices)
+                            ScanDiagnostics.WriteLine($"[D2XX] Device Index={d.Index} Serial={d.SerialNumber} Description={d.Description} Type={d.Type}");
+                    }
+                    catch (Exception ex)
+                    {
+                        ScanDiagnostics.WriteLine($"[D2XX] ListDevices error: {ex.Message}");
+                    }
 
-                // Update Left Device
+                    void LogDiscovery(string line)
+                    {
+                        System.Diagnostics.Debug.WriteLine(line);
+                        ScanDiagnostics.WriteLine(line);
+                    }
+
+                    // Wired discovery uses the SHARED SdkManager (single ProductManager, all calls through SdkGate).
+                    var wiredDiscoveryService = new HiProWiredDiscoveryService(_sdkManager!, LogDiscovery);
+                    var discoveryResult = await wiredDiscoveryService.DetectBothAsync(ct).ConfigureAwait(true);
+                    leftDeviceInfo = discoveryResult.FoundLeft ? new DeviceInfo
+                    {
+                        Side = DeviceSide.Left,
+                        Model = discoveryResult.LeftProductId ?? string.Empty,
+                        SerialNumber = discoveryResult.LeftSerialId ?? "Unknown",
+                        Firmware = discoveryResult.LeftFirmwareId ?? string.Empty,
+                        IsDetected = true
+                    } : null;
+                    rightDeviceInfo = discoveryResult.FoundRight ? new DeviceInfo
+                    {
+                        Side = DeviceSide.Right,
+                        Model = discoveryResult.RightProductId ?? string.Empty,
+                        SerialNumber = discoveryResult.RightSerialId ?? "Unknown",
+                        Firmware = discoveryResult.RightFirmwareId ?? string.Empty,
+                        IsDetected = true
+                    } : null;
+                    foreach (var err in discoveryResult.Errors)
+                    {
+                        var userMsg = HiProWiredDiscoveryService.GetUserMessageForErrorCode(err.ErrorCode, err.Side);
+                        if (!string.IsNullOrEmpty(userMsg)) LogDiscovery($"[{err.Side}] {userMsg}");
+                    }
+                }
+                else
+                {
+                    await InitializeSdkServicesAsync().ConfigureAwait(true);
+                    if (_deviceDiscoveryService == null)
+                    {
+                        var msg = string.IsNullOrEmpty(_lastSdkError)
+                            ? "SDK could not be initialized. Check sd.config, library file, and CTK Runtime (x86)."
+                            : "SDK initialization failed: " + _lastSdkError;
+                        throw new InvalidOperationException(msg);
+                    }
+
+                    var progress = new Progress<int>(p =>
+                    {
+                        DiscoveryProgress = p;
+                        FoundDevicesMessage = $"Discovering hearing aids... {p}%";
+                    });
+
+                    (leftDeviceInfo, rightDeviceInfo) = await _deviceDiscoveryService.DiscoverBothDevicesAsync(
+                        _selectedProgrammerInfo,
+                        progress,
+                        ct).ConfigureAwait(true);
+                }
+
+                // Update Left Device: set only when detected; clear when not
+                LeftDevice = null;
                 if (leftDeviceInfo != null)
                 {
                     var leftVm = new HearingAidViewModel
@@ -519,20 +788,22 @@ namespace Ul8ziz.FittingApp.App.Views
                         SerialNumber = leftDeviceInfo.SerialNumber,
                         Firmware = leftDeviceInfo.Firmware,
                         BatteryLevel = leftDeviceInfo.BatteryLevel ?? 0,
-                        IsSelected = true // Auto-select found devices
+                        IsSelected = true
                     };
                     leftVm.PropertyChanged += (s, args) =>
                     {
                         if (args.PropertyName == nameof(HearingAidViewModel.IsSelected))
                         {
                             OnPropertyChanged(nameof(SelectedDevicesCount));
+                            OnPropertyChanged(nameof(SelectedDevicesSummary));
                             OnPropertyChanged(nameof(CanConnect));
                         }
                     };
                     LeftDevice = leftVm;
                 }
 
-                // Update Right Device
+                // Update Right Device: set only when detected; clear when not
+                RightDevice = null;
                 if (rightDeviceInfo != null)
                 {
                     var rightVm = new HearingAidViewModel
@@ -542,35 +813,35 @@ namespace Ul8ziz.FittingApp.App.Views
                         SerialNumber = rightDeviceInfo.SerialNumber,
                         Firmware = rightDeviceInfo.Firmware,
                         BatteryLevel = rightDeviceInfo.BatteryLevel ?? 0,
-                        IsSelected = true // Auto-select found devices
+                        IsSelected = true
                     };
                     rightVm.PropertyChanged += (s, args) =>
                     {
                         if (args.PropertyName == nameof(HearingAidViewModel.IsSelected))
                         {
                             OnPropertyChanged(nameof(SelectedDevicesCount));
+                            OnPropertyChanged(nameof(SelectedDevicesSummary));
                             OnPropertyChanged(nameof(CanConnect));
                         }
                     };
                     RightDevice = rightVm;
                 }
 
+                SyncDevicesCollection();
                 var deviceCount = (leftDeviceInfo != null ? 1 : 0) + (rightDeviceInfo != null ? 1 : 0);
                 HasFoundDevices = deviceCount > 0;
 
                 if (deviceCount > 0)
-                {
-                    FoundDevicesMessage = $"Found {deviceCount} hearing aid(s)";
-                    System.Diagnostics.Debug.WriteLine($"Discovery complete: {deviceCount} device(s) found");
-                }
+                    FoundDevicesMessage = deviceCount == 1
+                        ? "Found 1 hearing aid(s). Select and connect."
+                        : "Found 2 hearing aid(s). Select and connect.";
                 else
-                {
-                    FoundDevicesMessage = "No hearing aids detected. Check that hearing aids are placed on the programmer.";
-                    System.Diagnostics.Debug.WriteLine("Discovery complete: no devices found");
-                }
-                
+                    FoundDevicesMessage = "No hearing aids found. Place devices on programmer and rescan.";
+                System.Diagnostics.Debug.WriteLine($"Discovery complete: {deviceCount} device(s) found");
                 IsDiscovering = false;
                 OnPropertyChanged(nameof(HasDevices));
+                OnPropertyChanged(nameof(ShowLeftDevice));
+                OnPropertyChanged(nameof(ShowRightDevice));
                 OnPropertyChanged(nameof(SelectedDevicesCount));
                 OnPropertyChanged(nameof(CanConnect));
             }
@@ -584,14 +855,19 @@ namespace Ul8ziz.FittingApp.App.Views
             {
                 IsDiscovering = false;
                 HasFoundDevices = false;
-                FoundDevicesMessage = $"Discovery failed: {ex.Message}";
+                var msg = ex.Message;
+                if (msg.IndexOf("SDK initialization failed", StringComparison.OrdinalIgnoreCase) >= 0)
+                    FoundDevicesMessage = msg;
+                else
+                    FoundDevicesMessage = "No hearing aids detected on HI-PRO left/right port.";
                 System.Diagnostics.Debug.WriteLine($"Discovery error: {ex.Message}");
-                
                 MessageBox.Show(
-                    $"Failed to discover hearing aids:\n\n{ex.Message}\n\nMake sure hearing aids are placed on the programmer.",
-                    "Discovery Error",
+                    string.IsNullOrEmpty(_lastSdkError)
+                        ? $"Discovery failed: {ex.Message}\n\nMake sure hearing aids are placed on the programmer."
+                        : $"SDK initialization failed: {_lastSdkError}",
+                    "Discovery",
                     MessageBoxButton.OK,
-                    MessageBoxImage.Error);
+                    MessageBoxImage.Warning);
             }
         }
 
@@ -607,6 +883,7 @@ namespace Ul8ziz.FittingApp.App.Views
         private void DeviceCheckBox_Checked(object sender, RoutedEventArgs e)
         {
             OnPropertyChanged(nameof(SelectedDevicesCount));
+            OnPropertyChanged(nameof(SelectedDevicesSummary));
             OnPropertyChanged(nameof(CanConnect));
         }
 
@@ -628,99 +905,279 @@ namespace Ul8ziz.FittingApp.App.Views
                 return;
             }
 
+            // ========== HARD GATE: Validate firmware and serial from discovery ==========
+            // Detect the firmware from the first selected device (Left preferred).
+            string? detectedFirmware = null;
+            foreach (var (device, side) in devicesToConnect)
+            {
+                if (!string.IsNullOrWhiteSpace(device.Firmware))
+                {
+                    detectedFirmware = device.Firmware;
+                    break;
+                }
+            }
+            if (string.IsNullOrWhiteSpace(detectedFirmware))
+            {
+                System.Diagnostics.Debug.WriteLine("[ConnectDevices] HARD GATE: No firmware detected on any selected device. Aborting connect.");
+                MessageBox.Show(
+                    "No firmware ID was detected during device discovery.\n\nPlease re-seat the hearing aid on the programmer and try Discover again.",
+                    "Cannot Connect", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            // Note: Serial=-1 or SerialId=0 from discovery/connect is NORMAL for devices
+            // that haven't been through manufacturing configuration. It does NOT indicate
+            // a handshake failure. The firmware ID is the reliable indicator of a valid device.
+
             IsConnecting = true;
             ConnectionProgress = 0;
             ConnectionStatusMessage = string.Empty;
+            AppSessionState.Instance.ConnectionState = ConnectionState.Connecting;
 
             try
             {
-                // Cancel any previous connection
                 _cancellationTokenSource?.Cancel();
                 _cancellationTokenSource = new CancellationTokenSource();
 
-                if (_deviceConnectionService == null)
+                await InitializeSdkServicesAsync().ConfigureAwait(true);
+                if (_sdkManager == null || _deviceConnectionService == null)
                 {
-                    throw new InvalidOperationException("Device connection service not available.");
+                    var msg = string.IsNullOrEmpty(_lastSdkError)
+                        ? "SDK could not be initialized. Check sd.config, library file, and CTK Runtime (x86)."
+                        : "SDK initialization failed: " + _lastSdkError;
+                    throw new InvalidOperationException(msg);
                 }
 
+                // ========== CRITICAL: Reload SDK with library matching detected firmware (inside SdkGate) ==========
+                try
+                {
+                    ConnectionStatusMessage = "Matching library to device firmware...";
+                    System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Reloading SDK for detected firmware: {detectedFirmware}");
+                    await SdkGate.InvokeAsync(() =>
+                    {
+                        _sdkManager!.ReloadForFirmware(detectedFirmware);
+                        _deviceConnectionService = new DeviceConnectionService(_sdkManager);
+                    }, "ReloadForFirmware").ConfigureAwait(true);
+                    System.Diagnostics.Debug.WriteLine($"[ConnectDevices] SDK reloaded OK. Product matches firmware: {detectedFirmware}");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[ConnectDevices] ReloadForFirmware FAILED: {ex.Message}");
+                    throw new InvalidOperationException(
+                        $"No library found for firmware '{detectedFirmware}'.\n\n" +
+                        "Ensure the matching .library file is in Assets\\SoundDesigner\\products\\.", ex);
+                }
+
+                var result = new ConnectionResult();
                 var totalDevices = devicesToConnect.Count;
                 for (int i = 0; i < totalDevices; i++)
                 {
                     var (device, side) = devicesToConnect[i];
                     ConnectionStatusMessage = $"Connecting to {device.Side} device...";
-
-                    var deviceIndex = i; // Capture for closure
+                    var deviceIndex = i;
                     var progress = new Progress<int>(p =>
                     {
-                        // Correct formula: each device gets an equal share of 100%
-                        ConnectionProgress = ((deviceIndex * 100) + p) / totalDevices;
+                        ConnectionProgress = totalDevices > 0 ? ((deviceIndex * 100) + p) / totalDevices : 0;
                     });
+                    try
+                    {
+                        var deviceInfo = await _deviceConnectionService.ConnectAsync(
+                            _selectedProgrammerInfo!,
+                            side,
+                            progress,
+                            _cancellationTokenSource.Token);
 
-                    var deviceInfo = await _deviceConnectionService.ConnectAsync(
-                        _selectedProgrammerInfo,
-                        side,
-                        progress,
-                        _cancellationTokenSource.Token);
+                        // Post-connect validation: reject ONLY if firmware is empty (real failure).
+                        // Serial=-1 is normal for unprogrammed devices — NOT a handshake error.
+                        if (string.IsNullOrEmpty(deviceInfo.Firmware))
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Post-connect HARD GATE: {side} has empty Firmware after connect. Connection may be corrupted.");
+                            throw new InvalidOperationException($"Device on {side} returned no firmware ID after connection. Re-seat and retry.");
+                        }
 
-                    // Update device information with actual data from SDK
-                    device.Model = deviceInfo.Model;
-                    device.SerialNumber = deviceInfo.SerialNumber;
-                    device.Firmware = deviceInfo.Firmware;
+                        if (deviceInfo.SerialNumber == "-1" || deviceInfo.SerialNumber == "0")
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ConnectDevices] INFO: {side} Serial={deviceInfo.SerialNumber} — unprogrammed device (normal for dev/test units).");
+                        }
+
+                        device.Model = deviceInfo.Model;
+                        device.SerialNumber = deviceInfo.SerialNumber;
+                        device.Firmware = deviceInfo.Firmware;
+                        if (side == DeviceSide.Left) result.LeftConnected = true;
+                        else result.RightConnected = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        var msg = ex.Message;
+                        if (msg.IndexOf("E_SEND_FAILURE", StringComparison.OrdinalIgnoreCase) >= 0 || msg.IndexOf("sending data", StringComparison.OrdinalIgnoreCase) >= 0)
+                            msg = "Communication error. Check cable, seating, and contacts.";
+                        if (side == DeviceSide.Left) { result.LeftError = msg; result.Errors.Add("Left: " + msg); }
+                        else { result.RightError = msg; result.Errors.Add("Right: " + msg); }
+                    }
                 }
-
+                result.Success = result.LeftConnected || result.RightConnected;
                 ConnectionProgress = 100;
-                ConnectionStatusMessage = "Successfully connected to all devices";
-                await Task.Delay(500);
-
                 IsConnecting = false;
-                IsConnected = true;
-
-                // Show success message
-                MessageBox.Show(
-                    "Successfully connected to all selected devices!",
-                    "Connection Successful",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-
-                // Auto-navigate after 1 second (optional)
-                await Task.Delay(1000);
-                // Navigation will be handled by MainView
+                if (result.Success)
+                {
+                    IsConnected = true;
+                    ConnectionStatusMessage = result.LeftConnected && result.RightConnected
+                        ? "Connected to both devices"
+                        : result.LeftConnected ? "Connected to Left device" : "Connected to Right device";
+                    string displayName = BuildConnectedDeviceDisplayName(result);
+                    AppSessionState.Instance.SetConnected(
+                        displayName,
+                        result.LeftConnected,
+                        result.RightConnected,
+                        result.LeftConnected ? LeftDevice?.Model : null,
+                        result.LeftConnected ? LeftDevice?.Firmware : null,
+                        result.LeftConnected ? LeftDevice?.SerialNumber : null,
+                        result.RightConnected ? RightDevice?.Model : null,
+                        result.RightConnected ? RightDevice?.Firmware : null,
+                        result.RightConnected ? RightDevice?.SerialNumber : null);
+                    DeviceSessionService.Instance.SetSession(
+                        _sdkManager!,
+                        _deviceConnectionService!,
+                        _selectedProgrammerInfo!,
+                        displayName,
+                        result.LeftConnected,
+                        result.RightConnected);
+                    // Set device identity so Configure Device (manufacturing) can match library to firmware.
+                    var firmwareId = (result.LeftConnected ? LeftDevice?.Firmware : null) ?? (result.RightConnected ? RightDevice?.Firmware : null)
+                        ?? _sdkManager!.LoadedFirmwareId;
+                    DeviceSessionService.Instance.SetDeviceIdentity(
+                        firmwareId,
+                        result.LeftConnected ? LeftDevice?.SerialNumber : null,
+                        result.RightConnected ? RightDevice?.SerialNumber : null,
+                        result.LeftConnected ? LeftDevice?.Model : null,
+                        result.RightConnected ? RightDevice?.Model : null);
+                    // Sync FittingSessionManager so IsDeviceConfigured reflects actual read capability
+                    // (e.g. E_UNCONFIGURED_DEVICE on unprogrammed device → Save stays disabled).
+                    var product = _sdkManager!.GetProduct();
+                    if (product != null)
+                    {
+                        try
+                        {
+                            await FittingSessionManager.Instance.SyncDeviceStateFromConnectionAsync(
+                                product,
+                                _deviceConnectionService!.GetConnection(DeviceSide.Left),
+                                _deviceConnectionService!.GetConnection(DeviceSide.Right),
+                                result.LeftConnected,
+                                result.RightConnected,
+                                _cancellationTokenSource?.Token ?? default);
+                        }
+                        catch (Exception syncEx)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ConnectDevices] SyncDeviceStateFromConnection failed: {syncEx.Message}");
+                        }
+                    }
+                    // Gate: ensure session state reflects actual init/configured (e.g. E_UNCONFIGURED_DEVICE → Not Configured).
+                    var session = DeviceSessionService.Instance;
+                    if (result.LeftConnected)
+                    {
+                        try
+                        {
+                            await DeviceInitializationService.EnsureInitializedAndConfiguredAsync(session, DeviceSide.Left, _cancellationTokenSource?.Token ?? default);
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ConnectDevices] EnsureInitializedAndConfigured(Left) failed: {ex.Message}");
+                        }
+                    }
+                    if (result.RightConnected)
+                    {
+                        try
+                        {
+                            await DeviceInitializationService.EnsureInitializedAndConfiguredAsync(session, DeviceSide.Right, _cancellationTokenSource?.Token ?? default);
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ConnectDevices] EnsureInitializedAndConfigured(Right) failed: {ex.Message}");
+                        }
+                    }
+                    var successMsg = result.Errors.Count > 0
+                        ? $"Connected to selected device(s).\n\n{string.Join("\n", result.Errors)}"
+                        : "Successfully connected to all selected devices.";
+                    MessageBox.Show(successMsg, "Connection", MessageBoxButton.OK, MessageBoxImage.Information);
+                    _ = LoadDeviceInfoAsync();
+                    OnConnectionSucceeded?.Invoke();
+                }
+                else
+                {
+                    IsConnected = false;
+                    ConnectionStatusMessage = "Connection failed";
+                    AppSessionState.Instance.ConnectionState = ConnectionState.ConnectionFailed;
+                    MessageBox.Show(
+                        string.IsNullOrEmpty(_lastSdkError)
+                            ? "Could not connect to devices.\n\n" + string.Join("\n", result.Errors)
+                            : "SDK initialization failed: " + _lastSdkError,
+                        "Connection",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    if (_deviceConnectionService != null)
+                    {
+                        try { await _deviceConnectionService.DisconnectAsync(DeviceSide.Left); } catch { }
+                        try { await _deviceConnectionService.DisconnectAsync(DeviceSide.Right); } catch { }
+                    }
+                }
+                await Task.Delay(500);
             }
             catch (OperationCanceledException)
             {
                 IsConnecting = false;
                 ConnectionStatusMessage = "Connection cancelled";
+                AppSessionState.Instance.ConnectionState = ConnectionState.NotConnected;
                 MessageBox.Show("Connection was cancelled.", "Connection Cancelled", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
                 IsConnecting = false;
                 IsConnected = false;
-                ConnectionStatusMessage = $"Connection failed: {ex.Message}";
-                
-                // Show error message to user
-                MessageBox.Show(
-                    $"Failed to connect to devices:\n{ex.Message}",
-                    "Connection Error",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-
-                // Cleanup failed connections
+                ConnectionStatusMessage = "Connection failed";
+                AppSessionState.Instance.ConnectionState = ConnectionState.ConnectionFailed;
+                var msg = ex.Message;
+                if (msg.IndexOf("SDK initialization failed", StringComparison.OrdinalIgnoreCase) >= 0)
+                    MessageBox.Show(msg, "Connection", MessageBoxButton.OK, MessageBoxImage.Warning);
+                else
+                    MessageBox.Show("Could not connect: " + msg, "Connection", MessageBoxButton.OK, MessageBoxImage.Error);
                 if (_deviceConnectionService != null)
                 {
-                    try
-                    {
-                        if (LeftDevice?.IsSelected == true)
-                            await _deviceConnectionService.DisconnectAsync(DeviceSide.Left);
-                    }
-                    catch { /* ignore cleanup errors */ }
-                    try
-                    {
-                        if (RightDevice?.IsSelected == true)
-                            await _deviceConnectionService.DisconnectAsync(DeviceSide.Right);
-                    }
-                    catch { /* ignore cleanup errors */ }
+                    try { await _deviceConnectionService.DisconnectAsync(DeviceSide.Left); } catch { }
+                    try { await _deviceConnectionService.DisconnectAsync(DeviceSide.Right); } catch { }
                 }
+            }
+        }
+
+        private string BuildConnectedDeviceDisplayName(ConnectionResult result)
+        {
+            string side = result.LeftConnected && result.RightConnected ? "L+R" : result.LeftConnected ? "Left" : result.RightConnected ? "Right" : string.Empty;
+            string name = "Hearing Aid";
+            if (result.LeftConnected && !string.IsNullOrWhiteSpace(LeftDevice?.Model))
+                name = LeftDevice!.Model;
+            else if (result.RightConnected && !string.IsNullOrWhiteSpace(RightDevice?.Model))
+                name = RightDevice!.Model;
+            else if (result.LeftConnected && !string.IsNullOrWhiteSpace(LeftDevice?.Firmware))
+                name = LeftDevice!.Firmware;
+            else if (result.RightConnected && !string.IsNullOrWhiteSpace(RightDevice?.Firmware))
+                name = RightDevice!.Firmware;
+            return string.IsNullOrEmpty(side) ? name : $"{name} ({side})";
+        }
+
+        private async System.Threading.Tasks.Task LoadDeviceInfoAsync()
+        {
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("[ConnectDevices] LoadDeviceInfoAsync: loading device identity and fitting data.");
+                var session = AppSessionState.Instance;
+                if (session.ConnectedLeft)
+                    System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Left: Model={session.LeftModelName} Firmware={session.LeftFirmwareId} Serial={session.LeftSerialId}");
+                if (session.ConnectedRight)
+                    System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Right: Model={session.RightModelName} Firmware={session.RightFirmwareId} Serial={session.RightSerialId}");
+                await System.Threading.Tasks.Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ConnectDevices] LoadDeviceInfoAsync error: {ex.Message}");
             }
         }
 
@@ -825,6 +1282,7 @@ namespace Ul8ziz.FittingApp.App.Views
             System.Diagnostics.Debug.WriteLine("CancelSearch_Click event fired");
             CancelSearch();
         }
+
     }
 
     // ViewModels

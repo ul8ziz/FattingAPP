@@ -1,0 +1,46 @@
+{
+  "default": {
+    "freqGain": { "centerFreqParamIds": [], "gainParamIdByLevel": {} },
+    "io": { "inputOutputParamIdsByFrequencyHz": {} }
+  },
+  "E7111V2.library": {
+    "freqGain": {
+      "centerFreqParamIds": [],
+      "gainParamIdByLevel": {
+        "40": "X_WDRC_LowLevelGain[0]",
+        "55": "X_WDRC_LowLevelGain[4]",
+        "70": "X_WDRC_HighLevelGain[0]",
+        "85": "X_WDRC_HighLevelGain[4]",
+        "100": "X_WDRC_HighLevelGain[8]"
+      }
+    },
+    "io": {
+      "inputOutputParamIdsByFrequencyHz": {
+        "1000": ["X_WDRC_HighLevelGain[4]"],
+        "2500": ["X_WDRC_HighLevelGain[6]"],
+        "4000": ["X_WDRC_HighLevelGain[8]"],
+        "6500": ["X_WDRC_HighLevelGain[10]"]
+      }
+    }
+  },
+  "E7111V2": {
+    "freqGain": {
+      "centerFreqParamIds": [],
+      "gainParamIdByLevel": {
+        "40": "X_WDRC_LowLevelGain[0]",
+        "55": "X_WDRC_LowLevelGain[4]",
+        "70": "X_WDRC_HighLevelGain[0]",
+        "85": "X_WDRC_HighLevelGain[4]",
+        "100": "X_WDRC_HighLevelGain[8]"
+      }
+    },
+    "io": {
+      "inputOutputParamIdsByFrequencyHz": {
+        "1000": ["X_WDRC_HighLevelGain[4]"],
+        "2500": ["X_WDRC_HighLevelGain[6]"],
+        "4000": ["X_WDRC_HighLevelGain[8]"],
+        "6500": ["X_WDRC_HighLevelGain[10]"]
+      }
+    }
+  }
+}

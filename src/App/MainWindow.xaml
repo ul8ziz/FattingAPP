@@ -10,7 +10,8 @@
         Height="800" Width="1200"
         WindowState="Maximized"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource BackgroundBrush}">
+        Background="{StaticResource BackgroundBrush}"
+        Loaded="Window_Loaded">
     <Grid>
         <views:MainView/>
     </Grid>

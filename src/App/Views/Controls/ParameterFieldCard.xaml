@@ -1,0 +1,112 @@
+<UserControl x:Class="Ul8ziz.FittingApp.App.Views.Controls.ParameterFieldCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:local="clr-namespace:Ul8ziz.FittingApp.App.Views.Controls"
+             mc:Ignorable="d"
+             d:DesignHeight="80" d:DesignWidth="500">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../../Styles/ParameterFieldStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Border Style="{StaticResource ParameterFieldCardStyle}"
+            Padding="16,14">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="120"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: Title + optional description -->
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding DisplayName, Mode=OneWay}"
+                               Style="{StaticResource ParameterFieldTitleStyle}"/>
+                    <!-- Inline help tooltip when description exists -->
+                    <TextBlock ToolTip="{Binding Description, Mode=OneWay}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource ParameterHelpIconStyle}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasDescription}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+                <TextBlock Text="{Binding Description, Mode=OneWay}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource ParameterFieldDescriptionStyle}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasDescription}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+
+            <!-- Right: Value control + unit badge + reset + dirty -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <!-- Dirty indicator -->
+                <Ellipse>
+                    <Ellipse.Style>
+                        <Style TargetType="Ellipse" BasedOn="{StaticResource ParameterDirtyDotStyle}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsDirty}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Ellipse.Style>
+                </Ellipse>
+                <!-- Value control (ContentTemplate from parent) -->
+                <ContentPresenter Content="{Binding}"
+                                  ContentTemplate="{Binding ValueTemplate, RelativeSource={RelativeSource AncestorType={x:Type local:ParameterFieldCard}}}"
+                                  MinWidth="100"/>
+                <!-- Unit badge (visible when Unit is non-empty) -->
+                <Border>
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource ParameterUnitBadgeStyle}">
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Unit}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Unit}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock Text="{Binding Unit, Mode=OneWay}" Style="{StaticResource ParameterUnitBadgeTextStyle}"/>
+                </Border>
+                <!-- Reset button (visible when ResetCommand is available) -->
+                <Button Command="{Binding ResetCommand, Mode=OneWay}"
+                        ToolTip="Reset to default">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource ParameterResetButtonStyle}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasResetCommand}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                    <TextBlock Text="↺" FontSize="14" Foreground="{StaticResource Gray600Brush}"/>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

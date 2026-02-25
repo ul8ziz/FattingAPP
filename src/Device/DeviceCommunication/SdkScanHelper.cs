@@ -64,6 +64,69 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         }
 
         /// <summary>
+        /// Gets CTK communication interface count (0 if API not present). Used for diagnostic dump.
+        /// </summary>
+        public static int GetCommunicationInterfaceCount(IProductManager productManager)
+        {
+            if (productManager == null) return 0;
+            try
+            {
+                var m = productManager.GetType().GetMethod("GetCommunicationInterfaceCount", BindingFlags.Public | BindingFlags.Instance);
+                if (m == null || m.GetParameters().Length != 0) return 0;
+                var c = m.Invoke(productManager, null);
+                return c != null ? Convert.ToInt32(c) : 0;
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>
+        /// Gets CTK communication interface string at index (null if API not present or out of range).
+        /// </summary>
+        public static string? GetCommunicationInterfaceString(IProductManager productManager, int index)
+        {
+            if (productManager == null) return null;
+            try
+            {
+                var m = productManager.GetType().GetMethod("GetCommunicationInterfaceString", BindingFlags.Public | BindingFlags.Instance);
+                if (m == null) return null;
+                var p = m.GetParameters();
+                if (p.Length != 1 || p[0].ParameterType != typeof(int)) return null;
+                return m.Invoke(productManager, new object[] { index })?.ToString();
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Gets CTK detailed error string if available (empty if not supported).
+        /// </summary>
+        public static string GetDetailedErrorString(IProductManager productManager)
+        {
+            if (productManager == null) return "";
+            try
+            {
+                var m = productManager.GetType().GetMethod("GetDetailedErrorString", BindingFlags.Public | BindingFlags.Instance);
+                if (m == null || m.GetParameters().Length != 0) return "";
+                return m.Invoke(productManager, null)?.ToString() ?? "";
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
+        /// Gets CTK error string if available (empty if not supported).
+        /// </summary>
+        public static string GetErrorString(IProductManager productManager)
+        {
+            if (productManager == null) return "";
+            try
+            {
+                var m = productManager.GetType().GetMethod("GetErrorString", BindingFlags.Public | BindingFlags.Instance);
+                if (m == null || m.GetParameters().Length != 0) return "";
+                return m.Invoke(productManager, null)?.ToString() ?? "";
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
         /// Tries to create a communication interface with the given settings, call CheckDevice, then close.
         /// Caller must ensure this runs on the dedicated STA thread and one attempt at a time.
         /// </summary>
@@ -102,6 +165,12 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 errorMessage = $"{ex.GetType().Name}: {ex.Message}";
                 if (ex.InnerException != null)
                     errorMessage += $" | Inner: {ex.InnerException.Message}";
+                if (ScanDiagnostics.IsSdException(ex))
+                {
+                    Console.WriteLine("SD_EXCEPTION: " + ex.Message);
+                    Console.WriteLine(ex.ToString());
+                    ScanDiagnostics.LogSdExceptionDetails(productManager, ex);
+                }
                 return false;
             }
             finally
