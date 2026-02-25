@@ -20,7 +20,7 @@ DefaultGroupName={#AppName}
 AllowNoIcons=yes
 OutputDir=..\publish
 OutputBaseFilename=FittingApp-Setup-1.0.0
-; SetupIconFile=..\src\App\Resources\Images\AppIcon.ico
+; SetupIconFile requires .ico from ImageMagick; .NET-generated .ico may be invalid for Inno
 UninstallDisplayIcon={app}\{#AppExe}
 Compression=lzma2/ultra64
 SolidCompression=yes
