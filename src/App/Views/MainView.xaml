@@ -253,7 +253,7 @@
                         <StackPanel Margin="12,16,12,0">
 
                             <!-- Connect Devices (disabled while Configure Device is running) -->
-                            <Button Style="{StaticResource SidebarNavButtonStyle}"
+                            <Button Style="{StaticResource SidebarNavButtonConnectStyle}"
                                     Click="ConnectDevicesButton_Click"
                                     IsEnabled="{Binding CanNavigateToConnect}"
                                     Margin="0,0,0,4">
@@ -266,7 +266,7 @@
                             </Button>
 
                             <!-- Audiogram (Graphs: Freq Gain, I/O) - always available; uses session data when connected or library loaded -->
-                            <Button Style="{StaticResource SidebarNavButtonStyle}"
+                            <Button Style="{StaticResource SidebarNavButtonAudiogramStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Audiogram"
                                     IsEnabled="True"
@@ -281,7 +281,7 @@
                             </Button>
 
                             <!-- Fitting -->
-                            <Button Style="{StaticResource SidebarNavButtonStyle}"
+                            <Button Style="{StaticResource SidebarNavButtonFittingStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Fitting"
                                     IsEnabled="{Binding IsNavigationEnabled}"
@@ -295,7 +295,7 @@
                             </Button>
 
                             <!-- Session Summary (disabled until implemented) -->
-                            <Button Style="{StaticResource SidebarNavButtonStyle}"
+                            <Button Style="{StaticResource SidebarNavButtonSessionSummaryStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="SessionSummary"
                                     IsEnabled="False"

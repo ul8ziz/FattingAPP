@@ -59,4 +59,42 @@
             </Setter.Value>
         </Setter>
     </Style>
+
+    <!-- Per-nav-key styles so selection stays visible when focus moves to content -->
+    <Style x:Key="SidebarNavButtonConnectStyle" TargetType="Button" BasedOn="{StaticResource SidebarNavButtonStyle}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding CurrentNavKey}" Value="ConnectDevices">
+                <Setter Property="Background" Value="{StaticResource SidebarSelectedBgBrush}"/>
+                <Setter Property="BorderThickness" Value="1.5"/>
+                <Setter Property="Foreground" Value="{StaticResource SidebarAccentBlueBrush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="SidebarNavButtonAudiogramStyle" TargetType="Button" BasedOn="{StaticResource SidebarNavButtonStyle}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding CurrentNavKey}" Value="Audiogram">
+                <Setter Property="Background" Value="{StaticResource SidebarSelectedBgBrush}"/>
+                <Setter Property="BorderThickness" Value="1.5"/>
+                <Setter Property="Foreground" Value="{StaticResource SidebarAccentBlueBrush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="SidebarNavButtonFittingStyle" TargetType="Button" BasedOn="{StaticResource SidebarNavButtonStyle}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding CurrentNavKey}" Value="Fitting">
+                <Setter Property="Background" Value="{StaticResource SidebarSelectedBgBrush}"/>
+                <Setter Property="BorderThickness" Value="1.5"/>
+                <Setter Property="Foreground" Value="{StaticResource SidebarAccentBlueBrush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="SidebarNavButtonSessionSummaryStyle" TargetType="Button" BasedOn="{StaticResource SidebarNavButtonStyle}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding CurrentNavKey}" Value="SessionSummary">
+                <Setter Property="Background" Value="{StaticResource SidebarSelectedBgBrush}"/>
+                <Setter Property="BorderThickness" Value="1.5"/>
+                <Setter Property="Foreground" Value="{StaticResource SidebarAccentBlueBrush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
 </ResourceDictionary>
