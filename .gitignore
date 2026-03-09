@@ -1,6 +1,9 @@
 # Build outputs
 **/bin/
 **/obj/
+publish/
+logs/
+tools/
 TestResults/
 *.user
 *.rsuser

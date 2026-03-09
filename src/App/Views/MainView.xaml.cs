@@ -31,7 +31,11 @@ namespace Ul8ziz.FittingApp.App.Views
                 if (_cachedConnectDevicesView == null)
                 {
                     _cachedConnectDevicesView = new ConnectDevicesView();
-                    _cachedConnectDevicesView.OnConnectionSucceeded = () => _viewModel.CurrentView = new FittingView();
+                    _cachedConnectDevicesView.OnConnectionSucceeded = () =>
+                    {
+                        _viewModel.CurrentNavKey = "Fitting";
+                        _viewModel.CurrentView = new FittingView();
+                    };
                 }
                 return _cachedConnectDevicesView;
             };
@@ -45,6 +49,7 @@ namespace Ul8ziz.FittingApp.App.Views
             {
                 var connectView = _viewModel.CreateConnectView?.Invoke() ?? new ConnectDevicesView();
                 connectView.ResetForInactiveConnection();
+                _viewModel.CurrentNavKey = "ConnectDevices";
                 _viewModel.CurrentView = connectView;
                 connectView.StartWiredDiscoveryAfterDebounce();
             };
@@ -103,6 +108,7 @@ namespace Ul8ziz.FittingApp.App.Views
 
         private void NavigateToConnectDevices()
         {
+            _viewModel.CurrentNavKey = "ConnectDevices";
             _viewModel.CurrentView = _viewModel.CreateConnectView?.Invoke() ?? new ConnectDevicesView();
         }
 
@@ -116,6 +122,7 @@ namespace Ul8ziz.FittingApp.App.Views
     public class MainViewModel : INotifyPropertyChanged
     {
         private UserControl? _currentView;
+        private string _currentNavKey = string.Empty;
         private ICommand? _endSessionCommand;
         private ICommand? _navigateCommand;
         private bool _sessionEndBannerVisible;
@@ -173,6 +180,13 @@ namespace Ul8ziz.FittingApp.App.Views
         {
             get => _currentView;
             set { _currentView = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>Current navigation key for sidebar highlight (ConnectDevices, Audiogram, Fitting, SessionSummary, or empty).</summary>
+        public string CurrentNavKey
+        {
+            get => _currentNavKey;
+            set { _currentNavKey = value ?? string.Empty; OnPropertyChanged(); }
         }
 
         public ICommand EndSessionCommand
@@ -244,6 +258,14 @@ namespace Ul8ziz.FittingApp.App.Views
                 _ => CreateWelcomeView()
             };
             
+            CurrentNavKey = viewName switch
+            {
+                "ConnectDevices" => "ConnectDevices",
+                "Audiogram" => "Audiogram",
+                "Fitting" => "Fitting",
+                "SessionSummary" => "SessionSummary",
+                _ => ""
+            };
             CurrentView = newView;
         }
 
