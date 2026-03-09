@@ -130,7 +130,8 @@
                 <EventSetter Event="Expanded" Handler="OnRightGroupExpanded"/>
             </Style>
             <DataTemplate x:Key="LeftGroupTemplate" DataType="models:GroupDescriptor">
-                <Expander DockPanel.Dock="Top" Style="{StaticResource LeftGroupExpanderStyle}">
+                <Expander DockPanel.Dock="Top" Style="{StaticResource LeftGroupExpanderStyle}"
+                          IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="{Binding Title}" VerticalAlignment="Center"/>
@@ -169,7 +170,8 @@
                 </Expander>
             </DataTemplate>
             <DataTemplate x:Key="RightGroupTemplate" DataType="models:GroupDescriptor">
-                <Expander DockPanel.Dock="Top" Style="{StaticResource RightGroupExpanderStyle}">
+                <Expander DockPanel.Dock="Top" Style="{StaticResource RightGroupExpanderStyle}"
+                          IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="{Binding Title}" VerticalAlignment="Center"/>
@@ -257,9 +259,11 @@
                     <ColumnDefinition Width="Auto"/>  <!-- Memory selector -->
                     <ColumnDefinition Width="Auto"/>  <!-- Live Mode -->
                     <ColumnDefinition Width="Auto"/>  <!-- Refresh -->
+                    <ColumnDefinition Width="Auto"/>  <!-- Reload from NVM -->
                     <ColumnDefinition Width="*"/>     <!-- Spacer -->
                     <ColumnDefinition Width="Auto"/>  <!-- Configure -->
                     <ColumnDefinition Width="Auto"/>  <!-- Save -->
+                    <ColumnDefinition Width="Auto"/>  <!-- Save All -->
                 </Grid.ColumnDefinitions>
 
                 <!-- Memory Selector -->
@@ -296,6 +300,14 @@
                     <TextBlock Text="Refresh" VerticalAlignment="Center" FontSize="13"/>
                 </Button>
 
+                <!-- Reload from NVM (Restore from NVM + Read from RAM for current memory) -->
+                <Button Grid.Column="3" Command="{Binding ReloadFromNvmCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Margin="0,0,6,0" Padding="14,8"
+                        ToolTip="Reload current memory from NVM">
+                    <TextBlock Text="Reload from NVM" VerticalAlignment="Center" FontSize="13"/>
+                </Button>
+
                 <!-- Configure Device (visible when connected but not configured) -->
                 <Button Grid.Column="4" Command="{Binding ConfigureDeviceCommand}"
                         Visibility="{Binding ShowConfigureButton, Converter={StaticResource BooleanToVisibilityConverter}}"
@@ -305,16 +317,23 @@
                     <TextBlock Text="Configure" FontSize="13"/>
                 </Button>
 
-                <!-- Save to Device -->
+                <!-- Save Current Memory (Burn to NVM) -->
                 <Button Grid.Column="5" Command="{Binding SaveToDeviceCommand}"
                         Style="{StaticResource SuccessButtonStyle}"
-                        Padding="18,8"
+                        Padding="18,8" Margin="0,0,8,0"
                         ToolTip="{Binding SaveToDeviceToolTip}">
-                    <TextBlock Text="Save to Device" FontSize="13"/>
+                    <TextBlock Text="Save Current Memory" FontSize="13"/>
                 </Button>
 
-                <!-- Status: Connected | Configured | Dirty/Saved -->
-                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="6"
+                <Button Grid.Column="6" Command="{Binding SaveAllMemoriesCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Padding="14,8"
+                        ToolTip="{Binding SaveAllMemoriesToolTip}">
+                    <TextBlock Text="Save ALL Memories" FontSize="13"/>
+                </Button>
+
+                <!-- Status: Connected | Configured | Dirty/Saved | Persisted to NVM -->
+                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="8"
                            Text="{Binding FittingStatusText}" FontSize="11"
                            Foreground="{StaticResource TextSecondaryBrush}"
                            Margin="0,6,0,0"/>

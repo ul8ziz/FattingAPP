@@ -31,21 +31,20 @@ namespace Ul8ziz.FittingApp.App.Services
             return string.IsNullOrEmpty(serialId) || serialId == "-1" || serialId == "0";
         }
 
-        /// <summary>Runs on UI/STA thread. Returns (Success, FailureReason) so the caller does not rely on closure.</summary>
-        private static async Task<(bool Success, string? FailureReason)> RunSaveOnDispatcherAsync(DeviceSessionService session)
+        /// <summary>Runs on UI/STA thread. Saves all memories (optionally only dirty ones).</summary>
+        private static async Task<(bool Success, string? FailureReason)> RunSaveAllOnDispatcherAsync(DeviceSessionService session, bool onlyDirty)
         {
             var product = session.SdkManager?.GetProduct();
             var conn = session.ConnectionService;
-            var (leftSnap, rightSnap) = session.GetSnapshotsForSave();
-            if (product == null || conn == null || (leftSnap == null && rightSnap == null))
+            if (product == null || conn == null)
             {
-                ScanDiagnostics.WriteLine("[SessionEnd] SaveToDevice skipped (no product, connection, or snapshot).");
-                return (false, "No product, connection, or snapshot.");
+                ScanDiagnostics.WriteLine("[SessionEnd] SaveToDevice skipped (no product or connection).");
+                return (false, "No product or connection.");
             }
 
             var appState = AppSessionState.Instance;
-            bool leftUnprogrammed = session.LeftConnected && leftSnap != null && IsUnprogrammed(appState.LeftSerialId);
-            bool rightUnprogrammed = session.RightConnected && rightSnap != null && IsUnprogrammed(appState.RightSerialId);
+            bool leftUnprogrammed = session.LeftConnected && IsUnprogrammed(appState.LeftSerialId);
+            bool rightUnprogrammed = session.RightConnected && IsUnprogrammed(appState.RightSerialId);
             if (leftUnprogrammed || rightUnprogrammed)
             {
                 if (leftUnprogrammed) System.Diagnostics.Debug.WriteLine("SessionEnd: SaveToDevice (Left) skipped — unprogrammed device.");
@@ -55,8 +54,8 @@ namespace Ul8ziz.FittingApp.App.Services
             }
 
             // Gate: ensure device is initialized and configured before WriteParameters.
-            bool leftNeedsSave = session.LeftConnected && leftSnap != null;
-            bool rightNeedsSave = session.RightConnected && rightSnap != null;
+            bool leftNeedsSave = session.LeftConnected;
+            bool rightNeedsSave = session.RightConnected;
             if (leftNeedsSave)
             {
                 try
@@ -94,31 +93,61 @@ namespace Ul8ziz.FittingApp.App.Services
                 return (false, session.LastConfigError ?? "Device not configured; cannot save. Ensure the device has been initialized for fitting.");
             }
 
-            string? failureReason = null;
             var soundDesigner = new SoundDesignerService();
-            var leftOk = true;
-            var rightOk = true;
-            if (leftNeedsSave)
+            string? failureReason = null;
+            var allOk = true;
+            System.Diagnostics.Debug.WriteLine($"[NVM] SaveAll onlyDirty={onlyDirty.ToString().ToLowerInvariant()} totalDirty={session.GetDirtyMemoryCount()}");
+
+            for (int memoryIndex = 0; memoryIndex < 8; memoryIndex++)
             {
-                System.Diagnostics.Debug.WriteLine("SessionEnd: SaveToDevice (Left)");
-                var adaptor = conn.GetConnection(DeviceSide.Left);
-                if (adaptor != null)
+                bool leftDirty = session.IsMemoryDirty(DeviceSide.Left, memoryIndex);
+                bool rightDirty = session.IsMemoryDirty(DeviceSide.Right, memoryIndex);
+                if (onlyDirty && !leftDirty && !rightDirty)
+                    continue;
+
+                if (leftNeedsSave && (!onlyDirty || leftDirty))
                 {
-                    leftOk = await soundDesigner.WriteSettingsAsync(product, adaptor, leftSnap!, null, default, onWriteFailed: msg => failureReason = msg ?? failureReason);
-                    if (!leftOk) System.Diagnostics.Debug.WriteLine($"SessionEnd: SaveToDevice (Left) failed. {failureReason ?? ""}");
+                    var (leftSnap, _) = session.GetSnapshotsForMemory(memoryIndex);
+                    if (leftSnap != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"SessionEnd: SaveToDevice (Left) memory={memoryIndex + 1}");
+                        var adaptor = conn.GetConnection(DeviceSide.Left);
+                        if (adaptor != null)
+                        {
+                            var ok = await soundDesigner.BurnMemoryToNvmAsync(product, adaptor, leftSnap, memoryIndex, null, default, onWriteFailed: msg => failureReason = msg ?? failureReason);
+                            if (ok)
+                            {
+                                var (verified, _) = await soundDesigner.VerifyMemoryMatchesNvmAsync(product, adaptor, leftSnap, memoryIndex, maxItemsToCheck: 20, default);
+                                if (!verified) { failureReason = failureReason ?? "Verify failed (Left M" + (memoryIndex + 1) + ")"; ok = false; }
+                            }
+                            if (!ok) allOk = false;
+                            if (ok) session.ClearMemoryDirty(DeviceSide.Left, memoryIndex);
+                        }
+                    }
+                }
+
+                if (rightNeedsSave && (!onlyDirty || rightDirty))
+                {
+                    var (_, rightSnap) = session.GetSnapshotsForMemory(memoryIndex);
+                    if (rightSnap != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"SessionEnd: SaveToDevice (Right) memory={memoryIndex + 1}");
+                        var adaptor = conn.GetConnection(DeviceSide.Right);
+                        if (adaptor != null)
+                        {
+                            var ok = await soundDesigner.BurnMemoryToNvmAsync(product, adaptor, rightSnap, memoryIndex, null, default, onWriteFailed: msg => failureReason = msg ?? failureReason);
+                            if (ok)
+                            {
+                                var (verified, _) = await soundDesigner.VerifyMemoryMatchesNvmAsync(product, adaptor, rightSnap, memoryIndex, maxItemsToCheck: 20, default);
+                                if (!verified) { failureReason = failureReason ?? "Verify failed (Right M" + (memoryIndex + 1) + ")"; ok = false; }
+                            }
+                            if (!ok) allOk = false;
+                            if (ok) session.ClearMemoryDirty(DeviceSide.Right, memoryIndex);
+                        }
+                    }
                 }
             }
-            if (rightNeedsSave)
-            {
-                System.Diagnostics.Debug.WriteLine("SessionEnd: SaveToDevice (Right)");
-                var adaptor = conn.GetConnection(DeviceSide.Right);
-                if (adaptor != null)
-                {
-                    rightOk = await soundDesigner.WriteSettingsAsync(product, adaptor, rightSnap!, null, default, onWriteFailed: msg => failureReason = msg ?? failureReason);
-                    if (!rightOk) System.Diagnostics.Debug.WriteLine($"SessionEnd: SaveToDevice (Right) failed. {failureReason ?? ""}");
-                }
-            }
-            return (leftOk && rightOk, failureReason);
+            return (allOk, failureReason);
         }
 
         public static async Task ExecuteEndSessionAsync(
@@ -157,9 +186,10 @@ namespace Ul8ziz.FittingApp.App.Services
                 string? saveFailureReason = null;
                 if (saveToDevice)
                 {
+                    System.Diagnostics.Debug.WriteLine("[EndSession] SaveAndEnd => SaveAllMemoriesToNvm onlyDirty=true");
                     try
                     {
-                        var resultTask = dispatcher.InvokeAsync(() => RunSaveOnDispatcherAsync(session)).Task;
+                        var resultTask = dispatcher.InvokeAsync(() => RunSaveAllOnDispatcherAsync(session, onlyDirty: true)).Task;
                         var (success, reason) = await await resultTask;
                         saveSucceeded = success;
                         saveFailureReason = reason;
@@ -193,6 +223,13 @@ namespace Ul8ziz.FittingApp.App.Services
                         System.Diagnostics.Debug.WriteLine("SessionEnd: NavigateToConnect after save failure");
                     });
                     return;
+                }
+
+                // Allow device time to flush WriteParameters to NVM before disconnecting.
+                if (saveToDevice && saveSucceeded)
+                {
+                    await Task.Delay(500).ConfigureAwait(false);
+                    System.Diagnostics.Debug.WriteLine("[SessionEnd] Post-save delay complete (500 ms)");
                 }
 
                 System.Diagnostics.Debug.WriteLine("SessionEnd: Disconnect (safe teardown)");

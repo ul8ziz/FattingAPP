@@ -56,6 +56,7 @@ namespace Ul8ziz.FittingApp.App.Services
 
             await SdkGate.RunAsync($"EnsureInitializedAndConfigured_{side}", ct, async () =>
             {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
                     // If already marked configured, verify with one ReadParameters probe (catches E_UNCONFIGURED_DEVICE for unprogrammed devices).
@@ -70,6 +71,8 @@ namespace Ul8ziz.FittingApp.App.Services
                                 await Task.Delay(50, ct);
                             }
                             monitor.GetResult();
+                            sw.Stop();
+                            System.Diagnostics.Debug.WriteLine($"[Perf] EnsureInit {side} probe OK ms={sw.ElapsedMilliseconds}");
                             Log($"[EnsureInit] {side} already configured; probe OK.");
                             ScanDiagnostics.WriteLine($"[EnsureInit] {side} already configured; probe OK.");
                             return;

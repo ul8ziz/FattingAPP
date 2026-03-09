@@ -41,7 +41,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[SettingsEnumerator] BuildSnapshotForMemory({memoryIndex}) error: {ex.Message}");
+                var inner = ex is System.Reflection.TargetInvocationException tie ? tie.InnerException ?? tie : ex;
+                Debug.WriteLine($"[SettingsEnumerator] BuildSnapshotForMemory({memoryIndex}) error: {inner?.Message ?? ex.Message}");
                 memParams = new List<SettingItem>();
             }
 
@@ -631,15 +632,59 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         }
 
         /// <summary>
-        /// Sets the SDK Parameter value from a SettingItem (Value, BooleanValue, DoubleValue per type).
+        /// Sets the SDK Parameter value from a SettingItem.
+        /// Per SDK Programmer's Guide Table 3 (Section 6.5): kDouble uses DoubleValue, kBoolean uses BooleanValue.
+        /// We try typed properties first for Double/Int/Bool to avoid E_INVALID_OPERATION from the generic Value setter;
+        /// then fall back to Value for other types or when typed setter fails.
         /// </summary>
         [DebuggerNonUserCode]
         private static bool TrySetParameterValue(object sdkParam, SettingItem item)
         {
             var v = item.Value;
             var paramType = sdkParam.GetType();
+            bool anyFailure = false;
 
-            // Try Value (generic setter) first
+            // Double/Int: try DoubleValue first (per SDK Programmer's Guide Table 3)
+            if (item.SettingDataType == SettingItem.DataType.Double || item.SettingDataType == SettingItem.DataType.Int)
+            {
+                var dblProp = GetCachedProperty(paramType, "DoubleValue");
+                if (dblProp != null && dblProp.CanWrite && v != null)
+                {
+                    try
+                    {
+                        dblProp.SetValue(sdkParam, Convert.ToDouble(v));
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        anyFailure = true;
+                        if (ex is System.Reflection.TargetInvocationException tie)
+                            Debug.WriteLine($"[SettingsEnumerator] TrySetParameterValue TargetInvocationException id={item.Id} inner={tie.InnerException?.Message ?? tie.Message}");
+                    }
+                }
+            }
+
+            // Bool: try BooleanValue first (per SDK Programmer's Guide Table 3)
+            if (item.SettingDataType == SettingItem.DataType.Bool)
+            {
+                var boolProp = GetCachedProperty(paramType, "BooleanValue");
+                if (boolProp != null && boolProp.CanWrite && v != null)
+                {
+                    try
+                    {
+                        boolProp.SetValue(sdkParam, Convert.ToBoolean(v));
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        anyFailure = true;
+                        if (ex is System.Reflection.TargetInvocationException tie)
+                            Debug.WriteLine($"[SettingsEnumerator] TrySetParameterValue TargetInvocationException id={item.Id} inner={tie.InnerException?.Message ?? tie.Message}");
+                    }
+                }
+            }
+
+            // Value (generic setter): for Integer/Byte/Enum/String/Unknown, or fallback when typed setter failed
             var valueProp = GetCachedProperty(paramType, "Value");
             if (valueProp != null && valueProp.CanWrite && v != null)
             {
@@ -654,49 +699,16 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 }
                 catch (Exception ex)
                 {
-                    var inner = ex is TargetInvocationException tie ? tie.InnerException : null;
-                    Debug.WriteLine($"[SettingsEnumerator] TrySetParameterValue(Value) failed: {(inner?.Message ?? ex.Message)}");
+                    anyFailure = true;
+                    if (ex is System.Reflection.TargetInvocationException tie)
+                        Debug.WriteLine($"[SettingsEnumerator] TrySetParameterValue TargetInvocationException id={item.Id} inner={tie.InnerException?.Message ?? tie.Message}");
                 }
             }
 
-            // Try DoubleValue for Double/Int
-            if (item.SettingDataType == SettingItem.DataType.Double || item.SettingDataType == SettingItem.DataType.Int)
+            if (anyFailure)
             {
-                var dblProp = GetCachedProperty(paramType, "DoubleValue");
-                if (dblProp != null && dblProp.CanWrite)
-                {
-                    try
-                    {
-                        dblProp.SetValue(sdkParam, Convert.ToDouble(v));
-                        return true;
-                    }
-                    catch (Exception ex)
-                    {
-                        var inner = ex is TargetInvocationException tie ? tie.InnerException : null;
-                        Debug.WriteLine($"[SettingsEnumerator] TrySetParameterValue(DoubleValue) failed: {(inner?.Message ?? ex.Message)}");
-                    }
-                }
+                Debug.WriteLine($"[SettingsEnumerator] TrySetParameterValue failed permanently: id={item.Id} type={item.SettingDataType} value={item.Value}");
             }
-
-            // Try BooleanValue for Bool
-            if (item.SettingDataType == SettingItem.DataType.Bool)
-            {
-                var boolProp = GetCachedProperty(paramType, "BooleanValue");
-                if (boolProp != null && boolProp.CanWrite)
-                {
-                    try
-                    {
-                        boolProp.SetValue(sdkParam, Convert.ToBoolean(v));
-                        return true;
-                    }
-                    catch (Exception ex)
-                    {
-                        var inner = ex is TargetInvocationException tie ? tie.InnerException : null;
-                        Debug.WriteLine($"[SettingsEnumerator] TrySetParameterValue(BooleanValue) failed: {(inner?.Message ?? ex.Message)}");
-                    }
-                }
-            }
-
             return false;
         }
 
@@ -1050,6 +1062,12 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             return b ?? null;
         }
 
+        /// <summary>Parameter IDs known to fail read-back on some devices/firmware (e.g. return 0 or default). Skip them in verification so Save and End can succeed.</summary>
+        private static readonly HashSet<string> KnownVerifySkipIds = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "X_AuxiliaryAttenuation" // Device often returns 0 after write on some firmware; value may be context-dependent.
+        };
+
         /// <summary>
         /// Verifies that a subset of snapshot parameters match the current SDK state (after read-back).
         /// Samples up to maxItemsToCheck items that have SdkParameterRef. Returns (true, null) if all match.
@@ -1058,7 +1076,6 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         internal static (bool Verified, string? FailureMessage) VerifySnapshotAfterReadBack(DeviceSettingsSnapshot snapshot, int maxItemsToCheck = 50)
         {
             if (snapshot == null) return (true, null);
-            const double doubleTolerance = 1e-9;
             int checkedCount = 0;
             foreach (var cat in snapshot.Categories)
             {
@@ -1067,18 +1084,12 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     foreach (var item in sec.Items)
                     {
                         if (item.SdkParameterRef == null || item.ReadOnly) continue;
+                        if (!string.IsNullOrEmpty(item.Id) && KnownVerifySkipIds.Contains(item.Id))
+                            continue;
                         if (checkedCount >= maxItemsToCheck) return (true, null);
                         var current = GetCurrentParameterValue(item.SdkParameterRef);
                         var expected = item.Value;
-                        bool match = false;
-                        if (expected == null && current == null) match = true;
-                        else if (expected != null && current != null)
-                        {
-                            if (expected is double ed && current is double cd)
-                                match = Math.Abs(ed - cd) <= doubleTolerance;
-                            else
-                                match = Equals(expected, current);
-                        }
+                        bool match = AreEquivalentAfterReadBack(item, expected, current);
                         if (!match)
                         {
                             Debug.WriteLine($"[SettingsEnumerator] VerifySnapshotAfterReadBack: mismatch Id={item.Id} expected={expected} current={current}");
@@ -1089,6 +1100,134 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 }
             }
             return (true, null);
+        }
+
+        /// <summary>Compares expected snapshot to actual (e.g. after ReloadFromNvm) by Id/value. Uses same tolerance as read-back verify.</summary>
+        [DebuggerNonUserCode]
+        internal static (bool Verified, string? FailureMessage) VerifySnapshotAfterReadBack(DeviceSettingsSnapshot expected, DeviceSettingsSnapshot actual, int maxItemsToCheck = 50)
+        {
+            if (expected == null) return (true, null);
+            if (actual == null) return (false, "No actual snapshot to compare.");
+            var actualById = new Dictionary<string, SettingItem>(StringComparer.OrdinalIgnoreCase);
+            foreach (var cat in actual.Categories)
+                foreach (var sec in cat.Sections)
+                    foreach (var item in sec.Items)
+                        if (!string.IsNullOrEmpty(item.Id)) actualById[item.Id] = item;
+            int checkedCount = 0;
+            foreach (var cat in expected.Categories)
+            {
+                foreach (var sec in cat.Sections)
+                {
+                    foreach (var item in sec.Items)
+                    {
+                        if (item.ReadOnly) continue;
+                        if (!string.IsNullOrEmpty(item.Id) && KnownVerifySkipIds.Contains(item.Id))
+                            continue;
+                        if (checkedCount >= maxItemsToCheck) return (true, null);
+                        if (!actualById.TryGetValue(item.Id ?? "", out var actualItem))
+                            continue;
+                        bool match = AreEquivalentAfterReadBack(item, item.Value, actualItem.Value);
+                        if (!match)
+                        {
+                            Debug.WriteLine($"[SettingsEnumerator] VerifySnapshotAfterReadBack: mismatch Id={item.Id} expected={item.Value} actual={actualItem.Value}");
+                            return (false, $"Verification failed: parameter '{item.Id}' did not match after read-back.");
+                        }
+                        checkedCount++;
+                    }
+                }
+            }
+            return (true, null);
+        }
+
+        [DebuggerNonUserCode]
+        private static bool AreEquivalentAfterReadBack(SettingItem item, object? expected, object? current)
+        {
+            if (expected == null && current == null) return true;
+            if (expected == null || current == null) return false;
+
+            // Numeric parameters can be quantized by device resolution (e.g., -35.96 written, -36.0 read back).
+            if (TryToDouble(expected, out var expectedDouble) && TryToDouble(current, out var currentDouble))
+            {
+                var tolerance = GetNumericVerifyTolerance(item);
+                return Math.Abs(expectedDouble - currentDouble) <= tolerance;
+            }
+
+            // Enum values may come back as numeric index or as the selected text label.
+            if (item.SettingDataType == SettingItem.DataType.Enum)
+            {
+                var expectedText = expected.ToString() ?? string.Empty;
+                var currentText = current.ToString() ?? string.Empty;
+                if (string.Equals(expectedText, currentText, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (TryToDouble(expected, out var expectedIdx) &&
+                    item.EnumValues != null &&
+                    item.EnumValues.Length > 0)
+                {
+                    var idx = (int)Math.Round(expectedIdx);
+                    if (idx >= 0 && idx < item.EnumValues.Length)
+                        return string.Equals(item.EnumValues[idx], currentText, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            return Equals(expected, current);
+        }
+
+        [DebuggerNonUserCode]
+        private static bool TryToDouble(object value, out double result)
+        {
+            try
+            {
+                switch (value)
+                {
+                    case double d:
+                        result = d;
+                        return true;
+                    case float f:
+                        result = f;
+                        return true;
+                    case int i:
+                        result = i;
+                        return true;
+                    case long l:
+                        result = l;
+                        return true;
+                    case decimal m:
+                        result = (double)m;
+                        return true;
+                    case string s:
+                        return double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out result)
+                               || double.TryParse(s, out result);
+                    default:
+                        result = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+                        return true;
+                }
+            }
+            catch
+            {
+                result = 0;
+                return false;
+            }
+        }
+
+        [DebuggerNonUserCode]
+        private static double GetNumericVerifyTolerance(SettingItem item)
+        {
+            if (!double.IsNaN(item.Step) && item.Step > 0)
+            {
+                // Half-step tolerance handles device quantization while still catching real mismatches.
+                return Math.Max(item.Step * 0.5, 1e-6);
+            }
+
+            if (item.SettingDataType == SettingItem.DataType.Int)
+                return 0.5;
+
+            // Some SDK parameters report no Step but are quantized to 0.1 on read-back.
+            // Use a conservative tolerance to avoid false save failures.
+            if (item.SettingDataType == SettingItem.DataType.Double || item.SettingDataType == SettingItem.DataType.Unknown)
+                return 0.05;
+
+            return 1e-3;
         }
 
         /// <summary>

@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,6 +41,9 @@ namespace Ul8ziz.FittingApp.App.Services
         private bool _isConfigureRunning;
         private DeviceSettingsSnapshot? _leftSnapshot;
         private DeviceSettingsSnapshot? _rightSnapshot;
+        private int _selectedMemoryIndex;
+        private readonly Dictionary<(DeviceSide Side, int MemoryIndex), DeviceSettingsSnapshot> _memorySnapshots = new();
+        private readonly HashSet<(DeviceSide Side, int MemoryIndex)> _dirtyMemories = new();
 
         private DeviceSessionService() { }
 
@@ -124,6 +129,7 @@ namespace Ul8ziz.FittingApp.App.Services
         public ProgrammerInfo? ProgrammerInfo => _programmerInfo;
         public bool HasDirty { get => _hasDirty; private set { _hasDirty = value; OnPropertyChanged(nameof(HasDirty)); } }
         public bool IsLiveDisplayEnabled { get => _isLiveDisplayEnabled; private set { _isLiveDisplayEnabled = value; OnPropertyChanged(nameof(IsLiveDisplayEnabled)); } }
+        public int SelectedMemoryIndex => _selectedMemoryIndex;
 
         /// <summary>Call after successful Connect. Stores references and initial configured state from connection.</summary>
         public void SetSession(
@@ -146,6 +152,10 @@ namespace Ul8ziz.FittingApp.App.Services
             _leftConfigured = leftConnected && (connectionService?.IsSideConfigured(DeviceSide.Left) ?? false);
             _rightConfigured = rightConnected && (connectionService?.IsSideConfigured(DeviceSide.Right) ?? false);
             _lastConfigError = null;
+            _hasDirty = false;
+            _memorySnapshots.Clear();
+            _dirtyMemories.Clear();
+            _selectedMemoryIndex = 0;
             OnPropertyChanged(nameof(HasActiveSession));
             OnPropertyChanged(nameof(LeftConnected));
             OnPropertyChanged(nameof(RightConnected));
@@ -157,6 +167,8 @@ namespace Ul8ziz.FittingApp.App.Services
             OnPropertyChanged(nameof(SdkManager));
             OnPropertyChanged(nameof(ConnectionService));
             OnPropertyChanged(nameof(ProgrammerInfo));
+            OnPropertyChanged(nameof(HasDirty));
+            OnPropertyChanged(nameof(SelectedMemoryIndex));
         }
 
         /// <summary>Called by FittingViewModel when snapshots are loaded or updated (for Save on session end).</summary>
@@ -164,12 +176,83 @@ namespace Ul8ziz.FittingApp.App.Services
         {
             _leftSnapshot = left;
             _rightSnapshot = right;
+            SetMemorySnapshot(DeviceSide.Left, _selectedMemoryIndex, left);
+            SetMemorySnapshot(DeviceSide.Right, _selectedMemoryIndex, right);
+        }
+
+        public void SetSelectedMemoryIndex(int memoryIndex)
+        {
+            if (memoryIndex < 0 || memoryIndex > 7) return;
+            _selectedMemoryIndex = memoryIndex;
+            OnPropertyChanged(nameof(SelectedMemoryIndex));
+        }
+
+        public void SetMemorySnapshot(DeviceSide side, int memoryIndex, DeviceSettingsSnapshot? snapshot)
+        {
+            if (memoryIndex < 0 || memoryIndex > 7 || snapshot == null) return;
+            _memorySnapshots[(side, memoryIndex)] = snapshot;
+        }
+
+        public bool TryGetMemorySnapshot(DeviceSide side, int memoryIndex, out DeviceSettingsSnapshot? snapshot)
+        {
+            if (_memorySnapshots.TryGetValue((side, memoryIndex), out var found))
+            {
+                snapshot = found;
+                return true;
+            }
+
+            snapshot = null;
+            return false;
         }
 
         /// <summary>Called by FittingViewModel when parameters change.</summary>
         public void SetDirty(bool dirty)
         {
-            HasDirty = dirty;
+            if (!dirty)
+            {
+                _dirtyMemories.Clear();
+            }
+            HasDirty = dirty || _dirtyMemories.Count > 0;
+        }
+
+        /// <summary>Marks the given memory as dirty. Returns true if the memory was not already dirty.</summary>
+        public bool MarkMemoryDirty(DeviceSide side, int memoryIndex)
+        {
+            if (memoryIndex < 0 || memoryIndex > 7) return false;
+            bool newlyDirty = _dirtyMemories.Add((side, memoryIndex));
+            HasDirty = true;
+            return newlyDirty;
+        }
+
+        public void ClearMemoryDirty(DeviceSide side, int memoryIndex)
+        {
+            _dirtyMemories.Remove((side, memoryIndex));
+            HasDirty = _dirtyMemories.Count > 0;
+        }
+
+        public bool IsMemoryDirty(DeviceSide side, int memoryIndex)
+        {
+            return _dirtyMemories.Contains((side, memoryIndex));
+        }
+
+        public bool HasAnyDirtyMemory()
+        {
+            return _dirtyMemories.Count > 0;
+        }
+
+        public int GetDirtyMemoryCount()
+        {
+            return _dirtyMemories.Count;
+        }
+
+        public IReadOnlyList<int> GetDirtyMemoryIndexesForSide(DeviceSide side)
+        {
+            return _dirtyMemories
+                .Where(x => x.Side == side)
+                .Select(x => x.MemoryIndex)
+                .Distinct()
+                .OrderBy(x => x)
+                .ToList();
         }
 
         /// <summary>Called by FittingViewModel when live display is toggled.</summary>
@@ -182,6 +265,15 @@ namespace Ul8ziz.FittingApp.App.Services
         public (DeviceSettingsSnapshot? Left, DeviceSettingsSnapshot? Right) GetSnapshotsForSave()
         {
             return (_leftSnapshot, _rightSnapshot);
+        }
+
+        public (DeviceSettingsSnapshot? Left, DeviceSettingsSnapshot? Right) GetSnapshotsForMemory(int memoryIndex)
+        {
+            DeviceSettingsSnapshot? left = null;
+            DeviceSettingsSnapshot? right = null;
+            _memorySnapshots.TryGetValue((DeviceSide.Left, memoryIndex), out left);
+            _memorySnapshots.TryGetValue((DeviceSide.Right, memoryIndex), out right);
+            return (left, right);
         }
 
         /// <summary>Returns the single SdkManager for scan/connect. Creates it inside SdkGate if not yet created and lifecycle allows. Do not create ProductManager elsewhere.</summary>
@@ -259,6 +351,7 @@ namespace Ul8ziz.FittingApp.App.Services
             // E) Clear references and reset gate for next session
             ClearSessionStateOnly();
             SdkGate.ResetForNewSession();
+            SdkLifecycle.SetState(SdkLifecycleState.Uninitialized);
             System.Diagnostics.Debug.WriteLine("[Dispose] ClearSessionAsync complete");
         }
 
@@ -298,6 +391,9 @@ namespace Ul8ziz.FittingApp.App.Services
             _isLiveDisplayEnabled = false;
             _leftSnapshot = null;
             _rightSnapshot = null;
+            _memorySnapshots.Clear();
+            _dirtyMemories.Clear();
+            _selectedMemoryIndex = 0;
             _isConfigureRunning = false;
             _sessionCts?.Cancel();
             _sessionCts?.Dispose();

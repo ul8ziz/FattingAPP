@@ -105,7 +105,16 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     foreach (IProductDefinition pd in _loadedLibrary.Products)
                     {
                         Debug.WriteLine($"[LibraryService] Creating offline product: {pd.Description}");
-                        _offlineProduct = pd.CreateProduct();
+                        try
+                        {
+                            _offlineProduct = pd.CreateProduct();
+                        }
+                        catch (System.Reflection.TargetInvocationException tex)
+                        {
+                            var inner = tex.InnerException ?? tex;
+                            Debug.WriteLine($"[LibraryService] CreateProduct TargetInvocationException inner: {inner.Message}");
+                            throw new InvalidOperationException($"CreateProduct failed: {inner.Message}", inner);
+                        }
                         ProductDescription = pd.Description;
                         break;
                     }

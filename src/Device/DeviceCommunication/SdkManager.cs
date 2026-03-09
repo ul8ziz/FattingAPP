@@ -93,7 +93,16 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     if (productDef != null)
                     {
                         Debug.WriteLine($"Creating product: {productDef.Description}");
-                        _product = productDef.CreateProduct();
+                        try
+                        {
+                            _product = productDef.CreateProduct();
+                        }
+                        catch (System.Reflection.TargetInvocationException tex)
+                        {
+                            var inner = tex.InnerException ?? tex;
+                            Debug.WriteLine($"[SdkManager] CreateProduct TargetInvocationException inner: {inner.Message}");
+                            throw new InvalidOperationException($"CreateProduct failed: {inner.Message}", inner);
+                        }
                     }
                     else
                     {

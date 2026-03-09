@@ -31,6 +31,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
         private readonly FittingSessionManager _sessionMgr = FittingSessionManager.Instance;
         private readonly ISoundDesignerService _soundDesigner = new SoundDesignerService();
         private readonly SettingsCache _settingsCache = new SettingsCache();
+        private readonly SemaphoreSlim _memoryIoLock = new SemaphoreSlim(1, 1);
         private CancellationTokenSource? _loadCts;
         private System.Timers.Timer? _liveModeDebounce;
         private System.Timers.Timer? _searchDebounce;
@@ -49,6 +50,8 @@ namespace Ul8ziz.FittingApp.App.ViewModels
         private bool _isOfflineMode;
         private int _selectedMemoryIndex;
         private bool _isConfiguring;
+        private bool _isMemoryLoadInProgress;
+        private string _nvmSaveStatus = string.Empty;
 
         // Lazy: group rows built only when expander opens. Key = (tabId, groupId).
         private readonly Dictionary<(string TabId, string GroupId), List<SettingItemViewModel>> _leftGroupRowsCache = new();
@@ -63,10 +66,12 @@ namespace Ul8ziz.FittingApp.App.ViewModels
         public FittingViewModel()
         {
             EnableLiveModeCommand = new RelayCommand(_ => ToggleLiveMode(), _ => !IsOfflineMode);
-            SaveToDeviceCommand = new RelayCommand(_ => SaveToDeviceAsync(), _ => !IsLoading && HasActiveSession && !IsOfflineMode && IsDeviceConfigured && (HasUnsavedChanges || !IsLiveModeEnabled));
+            SaveToDeviceCommand = new RelayCommand(_ => { _ = SaveCurrentMemoryToNvmAsync(CancellationToken.None); }, _ => !IsLoading && HasActiveSession && !IsOfflineMode && IsDeviceConfigured && IsCurrentMemoryDirty);
+            SaveAllMemoriesCommand = new RelayCommand(_ => { _ = SaveAllMemoriesToNvmAsync(onlyDirty: true, CancellationToken.None); }, _ => !IsLoading && HasActiveSession && !IsOfflineMode && IsDeviceConfigured && HasAnyDirtyMemory);
             ConfigureDeviceCommand = new RelayCommand(_ => ConfigureDeviceAsync(), _ => !IsLoading && !IsConfiguring && HasActiveSession && !IsOfflineMode && !IsDeviceConfigured);
             SelectTabCommand = new RelayCommand(p => SelectTab(p?.ToString() ?? ""), _ => true);
             RefreshReadCommand = new RelayCommand(_ => LoadSettingsAsync(), _ => !IsLoading && HasActiveSession);
+            ReloadFromNvmCommand = new RelayCommand(_ => { _ = ReloadFromNvmAsync(CancellationToken.None); }, _ => !IsLoading && HasActiveSession && !IsOfflineMode && IsDeviceConfigured);
             EnsureGroupLoadedLeftCommand = new RelayCommand(p => EnsureGroupLoadedAsync(DeviceSide.Left, p?.ToString() ?? ""), _ => true);
             EnsureGroupLoadedRightCommand = new RelayCommand(p => EnsureGroupLoadedAsync(DeviceSide.Right, p?.ToString() ?? ""), _ => true);
             SwitchMemoryCommand = new RelayCommand(_ => { }, _ => true); // Memory switching handled via SelectedMemoryIndex setter
@@ -76,19 +81,25 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 if (e.PropertyName == nameof(DeviceSessionService.IsConfigured) ||
                     e.PropertyName == nameof(DeviceSessionService.LastConfigError) ||
                     e.PropertyName == nameof(DeviceSessionService.LeftConnected) ||
-                    e.PropertyName == nameof(DeviceSessionService.RightConnected))
+                    e.PropertyName == nameof(DeviceSessionService.RightConnected) ||
+                    e.PropertyName == nameof(DeviceSessionService.HasDirty))
                 {
                     OnPropertyChanged(nameof(IsDeviceConfigured));
                     OnPropertyChanged(nameof(FittingStatusText));
                     OnPropertyChanged(nameof(SaveDisabledReason));
                     OnPropertyChanged(nameof(SaveToDeviceToolTip));
+                    OnPropertyChanged(nameof(SaveAllMemoriesToolTip));
                     OnPropertyChanged(nameof(ShowConfigureButton));
                     OnPropertyChanged(nameof(ConfigureDeviceToolTip));
+                    OnPropertyChanged(nameof(IsCurrentMemoryDirty));
+                    OnPropertyChanged(nameof(HasAnyDirtyMemory));
+                    CommandManager.InvalidateRequerySuggested();
                 }
             };
         }
 
         /// <summary>Memory names for the Memory Selector ComboBox (Memory 1..8).</summary>
+        public int[] AvailableMemories { get; } = new[] { 0, 1, 2, 3, 4, 5, 6, 7 };
         public string[] MemoryNames { get; } = new[]
         {
             "Memory 1", "Memory 2", "Memory 3", "Memory 4",
@@ -105,9 +116,10 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 if (_selectedMemoryIndex != value)
                 {
                     _selectedMemoryIndex = value;
+                    _session.SetSelectedMemoryIndex(value);
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(SelectedMemoryName));
-                    OnMemoryChanged();
+                    _ = OnMemoryChangedAsync();
                 }
             }
         }
@@ -119,6 +131,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
         public string ParamFileName => _sessionMgr.ParamFileName ?? "(no .param loaded)";
 
         public ICommand SwitchMemoryCommand { get; }
+        public ICommand ReloadFromNvmCommand { get; }
         public ICommand ConfigureDeviceCommand { get; }
 
         private void OnRequestStopLiveMode(object? sender, EventArgs e)
@@ -145,8 +158,14 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             ? "Cannot save – device must be programmed/configured."
             : string.Empty;
 
-        /// <summary>Tooltip for Save button: shows disabled reason or default save description.</summary>
-        public string SaveToDeviceToolTip => !string.IsNullOrEmpty(SaveDisabledReason) ? SaveDisabledReason : "Save current settings to device";
+        /// <summary>Tooltip for Save button: shows disabled reason or default save description (NVM-only).</summary>
+        public string SaveToDeviceToolTip => !string.IsNullOrEmpty(SaveDisabledReason) ? SaveDisabledReason : "Save current memory to NVM";
+        public string SaveAllMemoriesToolTip => !string.IsNullOrEmpty(SaveDisabledReason) ? SaveDisabledReason : "Save all dirty memories to NVM";
+        public bool IsMemoryLoadInProgress
+        {
+            get => _isMemoryLoadInProgress;
+            private set { _isMemoryLoadInProgress = value; OnPropertyChanged(); }
+        }
 
         /// <summary>True while Configure Device is running; disables the Configure button to prevent repeated clicks.</summary>
         public bool IsConfiguring
@@ -169,7 +188,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
         /// <summary>Tooltip for Configure button.</summary>
         public string ConfigureDeviceToolTip => "Attempt to configure device (manufacturing). If unavailable, use vendor tools.";
 
-        /// <summary>Status line for Fitting page: Connected, Configured, Dirty/Saved.</summary>
+        /// <summary>Status line for Fitting page: Connected, Configured, Dirty/Saved, Persisted to NVM.</summary>
         public string FittingStatusText
         {
             get
@@ -183,6 +202,8 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                     parts.Add("Not configured");
                 if (IsDeviceConfigured)
                     parts.Add(HasUnsavedChanges ? "Dirty" : "Saved");
+                if (!string.IsNullOrEmpty(_nvmSaveStatus))
+                    parts.Add(_nvmSaveStatus);
                 return string.Join(" | ", parts);
             }
         }
@@ -260,6 +281,12 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             set { _hasUnsavedChanges = value; _session.SetDirty(value); OnPropertyChanged(); OnPropertyChanged(nameof(FittingStatusText)); }
         }
 
+        public bool IsCurrentMemoryDirty =>
+            (_session.LeftConnected && _session.IsMemoryDirty(DeviceSide.Left, SelectedMemoryIndex)) ||
+            (_session.RightConnected && _session.IsMemoryDirty(DeviceSide.Right, SelectedMemoryIndex));
+
+        public bool HasAnyDirtyMemory => _session.HasAnyDirtyMemory();
+
         public DeviceSettingsSnapshot? LeftSnapshot
         {
             get => _leftSnapshot;
@@ -311,6 +338,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
 
         public ICommand EnableLiveModeCommand { get; }
         public ICommand SaveToDeviceCommand { get; }
+        public ICommand SaveAllMemoriesCommand { get; }
         public ICommand SelectTabCommand { get; }
         public ICommand RefreshReadCommand { get; }
         /// <summary>Call when left panel group Expander is expanded. Parameter = group Id.</summary>
@@ -344,6 +372,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             {
                 // Sync memory index from session manager
                 _selectedMemoryIndex = _sessionMgr.SelectedMemoryIndex;
+                _session.SetSelectedMemoryIndex(_selectedMemoryIndex);
 
                 LeftSnapshot = _sessionMgr.LeftSnapshot;
                 RightSnapshot = null; // Offline: show only left panel with library defaults
@@ -364,31 +393,54 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 OnPropertyChanged(nameof(ShowLeftCard));
                 OnPropertyChanged(nameof(ShowRightCard));
                 OnPropertyChanged(nameof(SelectedMemoryIndex));
+                OnPropertyChanged(nameof(IsCurrentMemoryDirty));
+                OnPropertyChanged(nameof(HasAnyDirtyMemory));
                 OnPropertyChanged(nameof(ParamFileName));
                 OnPropertyChanged(nameof(FittingStatusText));
             }
         }
 
         /// <summary>
-        /// Called when the user changes the memory selector.
-        /// Switches the session manager to the new memory and rebuilds the UI.
+        /// Called when user selects a memory.
+        /// Pipeline:
+        /// 1) set SelectedMemoryIndex
+        /// 2) ensure memory snapshot is loaded (cache/device/offline)
+        /// 3) swap current bound snapshots from cache
+        /// 4) refresh dirty/UI state without rebuilding tab metadata
         /// </summary>
-        private void OnMemoryChanged()
+        private async Task OnMemoryChangedAsync()
         {
-            if (!_sessionMgr.IsOffline && !_sessionMgr.IsDeviceAttached) return;
-
             try
             {
-                // Switch memory in session manager (applies .param values and rebuilds snapshot)
-                _sessionMgr.SwitchMemory(_selectedMemoryIndex);
+                System.Diagnostics.Debug.WriteLine($"[Memory] SelectedMemory={_selectedMemoryIndex + 1}");
+                IsMemoryLoadInProgress = true;
+                IsLoading = true;
+                LoadingMessage = $"Loading Memory {_selectedMemoryIndex + 1}…";
 
-                // Reload snapshot from session manager
-                LeftSnapshot = _sessionMgr.LeftSnapshot;
+                if (_session.LeftConnected)
+                    await EnsureMemoryLoadedAsync(DeviceSide.Left, _selectedMemoryIndex, CancellationToken.None);
+                if (_session.RightConnected)
+                    await EnsureMemoryLoadedAsync(DeviceSide.Right, _selectedMemoryIndex, CancellationToken.None);
+
+                if (!_session.HasActiveSession)
+                {
+                    // Offline path keeps existing behavior through session manager.
+                    _sessionMgr.SwitchMemory(_selectedMemoryIndex);
+                    LeftSnapshot = _sessionMgr.LeftSnapshot;
+                    RightSnapshot = null;
+                }
+                else
+                {
+                    if (_session.TryGetMemorySnapshot(DeviceSide.Left, _selectedMemoryIndex, out var left))
+                        LeftSnapshot = left;
+                    if (_session.TryGetMemorySnapshot(DeviceSide.Right, _selectedMemoryIndex, out var right))
+                        RightSnapshot = right;
+                }
 
                 BuildItemCaches();
-                RebuildDynamicTabs();
+                EnsureTabLoadedAsync(SelectedTabId);
                 UpdateFilteredItems();
-
+                RefreshSaveState();
                 System.Diagnostics.Debug.WriteLine($"[FittingVM] Memory switched to {_selectedMemoryIndex + 1}");
             }
             catch (Exception ex)
@@ -396,6 +448,11 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 ErrorMessage = $"Error switching memory: {ex.Message}";
                 ShowRetryInErrorBanner = true;
                 LogFittingException("MemorySwitch", ex);
+            }
+            finally
+            {
+                IsLoading = false;
+                IsMemoryLoadInProgress = false;
             }
         }
 
@@ -478,6 +535,11 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 foreach (var g in leftGroups) LeftGroups.Add(g);
                 RightGroups.Clear();
                 foreach (var g in rightGroups) RightGroups.Add(g);
+                // Load rows for all groups so expanded-by-default groups show content (Expanded event may not fire on first render)
+                foreach (var g in leftGroups)
+                    EnsureGroupLoadedAsync(DeviceSide.Left, g.Id);
+                foreach (var g in rightGroups)
+                    EnsureGroupLoadedAsync(DeviceSide.Right, g.Id);
                 var tab = Tabs.FirstOrDefault(t => string.Equals(t.Id, tabId, StringComparison.OrdinalIgnoreCase));
                 if (tab != null) tab.IsLoaded = true;
                 sw.Stop();
@@ -621,7 +683,16 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                                 if (e.PropertyName == nameof(SettingItem.Value))
                                 {
                                     _settingsCache.DirtyBuffer.Add(side, item.Id, item.Value);
+                                    bool newlyDirty = _session.MarkMemoryDirty(side, SelectedMemoryIndex);
+                                    if (newlyDirty)
+                                    {
+                                        _nvmSaveStatus = string.Empty;
+                                        OnPropertyChanged(nameof(FittingStatusText));
+                                        System.Diagnostics.Debug.WriteLine($"[Memory] Dirty side={side} memory={SelectedMemoryIndex + 1} changedParam={item.Id}");
+                                    }
                                     HasUnsavedChanges = true;
+                                    OnPropertyChanged(nameof(IsCurrentMemoryDirty));
+                                    OnPropertyChanged(nameof(HasAnyDirtyMemory));
                                 }
                             }
                             item.PropertyChanged += Handler;
@@ -642,6 +713,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             _loadCts?.Dispose();
             _loadCts = new CancellationTokenSource();
             var ct = _loadCts.Token;
+            _session.SetSelectedMemoryIndex(_selectedMemoryIndex);
             IsLoading = true;
             IsOfflineMode = false;
             ErrorMessage = "";
@@ -669,9 +741,19 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 {
                     ErrorMessage = _session.LastConfigError;
                     if (_session.LeftConnected)
-                        LeftSnapshot = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, _selectedMemoryIndex, DeviceSide.Left);
+                    {
+                        var leftOffline = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, _selectedMemoryIndex, DeviceSide.Left);
+                        LeftSnapshot = leftOffline;
+                        _session.SetMemorySnapshot(DeviceSide.Left, _selectedMemoryIndex, leftOffline);
+                        System.Diagnostics.Debug.WriteLine($"[Memory] Load side=Left memory={_selectedMemoryIndex + 1} source=offline");
+                    }
                     if (_session.RightConnected)
-                        RightSnapshot = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, _selectedMemoryIndex, DeviceSide.Right);
+                    {
+                        var rightOffline = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, _selectedMemoryIndex, DeviceSide.Right);
+                        RightSnapshot = rightOffline;
+                        _session.SetMemorySnapshot(DeviceSide.Right, _selectedMemoryIndex, rightOffline);
+                        System.Diagnostics.Debug.WriteLine($"[Memory] Load side=Right memory={_selectedMemoryIndex + 1} source=offline");
+                    }
                     System.Diagnostics.Debug.WriteLine("[FittingVM] LoadSettings: device already known not configured — skip Ensure, use library snapshots.");
                 }
                 else
@@ -728,11 +810,13 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                         {
                             LoadingMessage = "Reading Left device parameters…";
                             var readSw = System.Diagnostics.Stopwatch.StartNew();
-                            var left = await _soundDesigner.ReadAllSettingsAsync(product, adaptor, DeviceSide.Left, progress, ct);
+                            var left = await _soundDesigner.ReloadFromNvmAsync(product, adaptor, DeviceSide.Left, _selectedMemoryIndex, progress, ct);
                             readSw.Stop();
                             var leftCount = left?.Categories.SelectMany(c => c.Sections.SelectMany(s => s.Items)).Count() ?? 0;
                             System.Diagnostics.Debug.WriteLine($"[Perf] ReadSpace side=Left ms={readSw.ElapsedMilliseconds} params={leftCount}");
+                            System.Diagnostics.Debug.WriteLine($"[Memory] Load side=Left memory={_selectedMemoryIndex + 1} source=device");
                             LeftSnapshot = left;
+                            _session.SetMemorySnapshot(DeviceSide.Left, _selectedMemoryIndex, left);
                         }
                         catch (Exception ex)
                         {
@@ -744,7 +828,10 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 else if (_session.LeftConnected && !_session.IsSideConfigured(DeviceSide.Left))
                 {
                     // Show parameters from library so the UI has tabs/items; values are not from device.
-                    LeftSnapshot = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, _selectedMemoryIndex, DeviceSide.Left);
+                    var leftOffline = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, _selectedMemoryIndex, DeviceSide.Left);
+                    LeftSnapshot = leftOffline;
+                    _session.SetMemorySnapshot(DeviceSide.Left, _selectedMemoryIndex, leftOffline);
+                    System.Diagnostics.Debug.WriteLine($"[Memory] Load side=Left memory={_selectedMemoryIndex + 1} source=offline");
                 }
 
                 // Read Right side (only if device is configured)
@@ -757,11 +844,13 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                         {
                             LoadingMessage = "Reading Right device parameters…";
                             var readSw = System.Diagnostics.Stopwatch.StartNew();
-                            var right = await _soundDesigner.ReadAllSettingsAsync(product, adaptor, DeviceSide.Right, progress, ct);
+                            var right = await _soundDesigner.ReloadFromNvmAsync(product, adaptor, DeviceSide.Right, _selectedMemoryIndex, progress, ct);
                             readSw.Stop();
                             var rightCount = right?.Categories.SelectMany(c => c.Sections.SelectMany(s => s.Items)).Count() ?? 0;
                             System.Diagnostics.Debug.WriteLine($"[Perf] ReadSpace side=Right ms={readSw.ElapsedMilliseconds} params={rightCount}");
+                            System.Diagnostics.Debug.WriteLine($"[Memory] Load side=Right memory={_selectedMemoryIndex + 1} source=device");
                             RightSnapshot = right;
+                            _session.SetMemorySnapshot(DeviceSide.Right, _selectedMemoryIndex, right);
                         }
                         catch (Exception ex)
                         {
@@ -774,7 +863,10 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 {
                     if (!string.IsNullOrEmpty(ErrorMessage)) ErrorMessage += " ";
                     ErrorMessage += "Right device is not configured. Parameters cannot be read.";
-                    RightSnapshot = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, _selectedMemoryIndex, DeviceSide.Right);
+                    var rightOffline = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, _selectedMemoryIndex, DeviceSide.Right);
+                    RightSnapshot = rightOffline;
+                    _session.SetMemorySnapshot(DeviceSide.Right, _selectedMemoryIndex, rightOffline);
+                    System.Diagnostics.Debug.WriteLine($"[Memory] Load side=Right memory={_selectedMemoryIndex + 1} source=offline");
                 }
 
                 } // end else (run Ensure + read/snapshots)
@@ -794,9 +886,13 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 OnPropertyChanged(nameof(IsDeviceConfigured));
                 OnPropertyChanged(nameof(SaveDisabledReason));
                 OnPropertyChanged(nameof(SaveToDeviceToolTip));
+                OnPropertyChanged(nameof(SaveAllMemoriesToolTip));
                 OnPropertyChanged(nameof(ShowConfigureButton));
                 OnPropertyChanged(nameof(ConfigureDeviceToolTip));
                 OnPropertyChanged(nameof(FittingStatusText));
+                OnPropertyChanged(nameof(IsCurrentMemoryDirty));
+                OnPropertyChanged(nameof(HasAnyDirtyMemory));
+                CommandManager.InvalidateRequerySuggested();
             }
         }
 
@@ -859,97 +955,288 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             return string.IsNullOrEmpty(serialId) || serialId == "-1" || serialId == "0";
         }
 
-        private async void SaveToDeviceAsync()
+        private async Task EnsureMemoryLoadedAsync(DeviceSide side, int memoryIndex, CancellationToken ct)
         {
-            if (!HasActiveSession) return;
+            if (memoryIndex < 0 || memoryIndex > 7) return;
+            if (_session.TryGetMemorySnapshot(side, memoryIndex, out var cached) && cached != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Memory] Load side={side} memory={memoryIndex + 1} source=cache");
+                return;
+            }
+
             var product = _session.SdkManager?.GetProduct();
             var conn = _session.ConnectionService;
             if (product == null || conn == null) return;
 
-            var appState = AppSessionState.Instance;
-            bool leftUnprogrammed = _session.LeftConnected && LeftSnapshot != null && IsUnprogrammed(appState.LeftSerialId);
-            bool rightUnprogrammed = _session.RightConnected && RightSnapshot != null && IsUnprogrammed(appState.RightSerialId);
-            if (leftUnprogrammed || rightUnprogrammed)
-            {
-                ErrorMessage = "Device(s) unprogrammed (Serial=-1 or 0). Save to device is not available. Use a programmed device or manufacturing tools.";
-                ShowRetryInErrorBanner = false; // Retry (re-read) won't help until a programmed device is connected
-                return;
-            }
-
-            // Gate: ensure device is configured before WriteParameters.
-            if (_session.LeftConnected && LeftSnapshot != null)
-            {
-                try { await DeviceInitializationService.EnsureInitializedAndConfiguredAsync(_session, DeviceSide.Left, CancellationToken.None); }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[FittingVM] SaveToDevice EnsureInit(Left) failed: {ex.Message}");
-                    ScanDiagnostics.WriteLine($"[FittingVM] SaveToDevice EnsureInit(Left) failed: " + ex.Message);
-                    ErrorMessage = _session.LastConfigError ?? ex.Message;
-                    return;
-                }
-            }
-            if (_session.RightConnected && RightSnapshot != null)
-            {
-                try { await DeviceInitializationService.EnsureInitializedAndConfiguredAsync(_session, DeviceSide.Right, CancellationToken.None); }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[FittingVM] SaveToDevice EnsureInit(Right) failed: {ex.Message}");
-                    ScanDiagnostics.WriteLine($"[FittingVM] SaveToDevice EnsureInit(Right) failed: " + ex.Message);
-                    ErrorMessage = _session.LastConfigError ?? ex.Message;
-                    return;
-                }
-            }
-            if (!_session.IsConfigured)
-            {
-                ErrorMessage = _session.LastConfigError ?? "Device must be configured before Save to Device.";
-                System.Diagnostics.Debug.WriteLine("[FittingVM] SaveToDevice blocked — device not configured.");
-                ScanDiagnostics.WriteLine("[FittingVM] SaveToDevice blocked — device not configured.");
-                return;
-            }
-
-            var progress = new Progress<string>(m => LoadingMessage = m);
-            IsLoading = true;
-            var saveSw = Stopwatch.StartNew();
-            var dirtyCount = _settingsCache.DirtyBuffer.Count;
+            await _memoryIoLock.WaitAsync(ct);
             try
             {
-                if (_session.LeftConnected && LeftSnapshot != null)
+                if (_session.TryGetMemorySnapshot(side, memoryIndex, out cached) && cached != null)
                 {
+                    System.Diagnostics.Debug.WriteLine($"[Memory] Load side={side} memory={memoryIndex + 1} source=cache");
+                    return;
+                }
+
+                if (!_session.IsSideConfigured(side))
+                {
+                    var offline = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, memoryIndex, side);
+                    _session.SetMemorySnapshot(side, memoryIndex, offline);
+                    System.Diagnostics.Debug.WriteLine($"[Memory] Load side={side} memory={memoryIndex + 1} source=offline");
+                    return;
+                }
+
+                var adaptor = conn.GetConnection(side);
+                if (adaptor == null) return;
+
+                // NVM-only: Restore from NVM then read from RAM (presuite_memory_switch.py).
+                var progress = new Progress<string>(m => LoadingMessage = m);
+                var snapshot = await _soundDesigner.ReloadFromNvmAsync(product, adaptor, side, memoryIndex, progress, ct);
+                _session.SetMemorySnapshot(side, memoryIndex, snapshot);
+                System.Diagnostics.Debug.WriteLine($"[Memory] Load side={side} memory={memoryIndex + 1} source=device");
+                LogDeviceLoadFingerprint(side, memoryIndex + 1, snapshot);
+            }
+            finally
+            {
+                _memoryIoLock.Release();
+            }
+        }
+
+        /// <summary>Logs a fingerprint of the loaded device snapshot (first param Id and value) for diagnostics when verifying persistence on reconnect.</summary>
+        private static void LogDeviceLoadFingerprint(DeviceSide side, int memoryOneBased, DeviceSettingsSnapshot? snapshot)
+        {
+            if (snapshot == null) return;
+            var first = snapshot.Categories
+                .SelectMany(c => c.Sections.SelectMany(s => s.Items))
+                .FirstOrDefault();
+            if (first != null)
+                System.Diagnostics.Debug.WriteLine($"[Memory] Load fingerprint side={side} memory={memoryOneBased} firstParam={first.Id} value={first.Value}");
+        }
+
+        private async void SaveToDeviceAsync()
+        {
+            await SaveCurrentMemoryToNvmAsync(CancellationToken.None);
+        }
+
+        /// <summary>NVM-only: Reload current memory from NVM then read from RAM for both sides. Logs [NVM] Restore M#.</summary>
+        private async Task ReloadFromNvmAsync(CancellationToken ct)
+        {
+            if (!HasActiveSession || IsOfflineMode || !_session.IsConfigured) return;
+            var product = _session.SdkManager?.GetProduct();
+            var conn = _session.ConnectionService;
+            if (product == null || conn == null) return;
+
+            IsLoading = true;
+            LoadingMessage = $"Reloading Memory {SelectedMemoryIndex + 1} from NVM…";
+            try
+            {
+                if (_session.LeftConnected)
+                {
+                    await DeviceInitializationService.EnsureInitializedAndConfiguredAsync(_session, DeviceSide.Left, ct);
                     var adaptor = conn.GetConnection(DeviceSide.Left);
-                    if (adaptor != null)
+                    if (adaptor != null && _session.IsSideConfigured(DeviceSide.Left))
                     {
-                        var ok = await _soundDesigner.WriteSettingsAsync(product, adaptor, LeftSnapshot, progress, CancellationToken.None, selectedMemoryIndex: _sessionMgr.SelectedMemoryIndex);
-                        if (ok)
-                        {
-                            _settingsCache.DirtyBuffer.Clear();
-                            _settingsCache.InvalidateCacheForSide(DeviceSide.Left);
-                            HasUnsavedChanges = false;
-                        }
+                        var left = await _soundDesigner.ReloadFromNvmAsync(product, adaptor, DeviceSide.Left, _selectedMemoryIndex, new Progress<string>(m => LoadingMessage = m), ct);
+                        _session.SetMemorySnapshot(DeviceSide.Left, _selectedMemoryIndex, left);
+                        LeftSnapshot = left;
                     }
                 }
-                if (_session.RightConnected && RightSnapshot != null)
+                if (_session.RightConnected && !ct.IsCancellationRequested)
                 {
+                    await DeviceInitializationService.EnsureInitializedAndConfiguredAsync(_session, DeviceSide.Right, ct);
                     var adaptor = conn.GetConnection(DeviceSide.Right);
-                    if (adaptor != null)
+                    if (adaptor != null && _session.IsSideConfigured(DeviceSide.Right))
                     {
-                        var ok = await _soundDesigner.WriteSettingsAsync(product, adaptor, RightSnapshot, progress, CancellationToken.None, selectedMemoryIndex: _sessionMgr.SelectedMemoryIndex);
-                        if (ok)
-                        {
-                            _settingsCache.DirtyBuffer.Clear();
-                            _settingsCache.InvalidateCacheForSide(DeviceSide.Right);
-                            HasUnsavedChanges = false;
-                        }
+                        var right = await _soundDesigner.ReloadFromNvmAsync(product, adaptor, DeviceSide.Right, _selectedMemoryIndex, new Progress<string>(m => LoadingMessage = m), ct);
+                        _session.SetMemorySnapshot(DeviceSide.Right, _selectedMemoryIndex, right);
+                        RightSnapshot = right;
                     }
                 }
-                saveSw.Stop();
-                System.Diagnostics.Debug.WriteLine($"[Perf] SaveToDevice side=Both ms={saveSw.ElapsedMilliseconds} dirty={dirtyCount}");
-                // Reload to verify
-                LoadSettingsAsync();
+                BuildItemCaches();
+                UpdateFilteredItems();
+                RefreshSaveState();
             }
             finally
             {
                 IsLoading = false;
             }
+        }
+
+        private async Task SaveCurrentMemoryToNvmAsync(CancellationToken ct)
+        {
+            if (!HasActiveSession || IsOfflineMode) return;
+            if (!IsCurrentMemoryDirty || !_session.IsConfigured) return;
+
+            var product = _session.SdkManager?.GetProduct();
+            var conn = _session.ConnectionService;
+            if (product == null || conn == null) return;
+
+            var appState = AppSessionState.Instance;
+            bool leftUnprogrammed = _session.LeftConnected && IsUnprogrammed(appState.LeftSerialId);
+            bool rightUnprogrammed = _session.RightConnected && IsUnprogrammed(appState.RightSerialId);
+            if (leftUnprogrammed || rightUnprogrammed)
+            {
+                ErrorMessage = "Device(s) unprogrammed (Serial=-1 or 0). Save to device is not available. Use a programmed device or manufacturing tools.";
+                ShowRetryInErrorBanner = false;
+                return;
+            }
+
+            IsLoading = true;
+            LoadingMessage = $"Saving Memory {SelectedMemoryIndex + 1}…";
+            try
+            {
+                if (_session.LeftConnected)
+                    await EnsureMemoryLoadedAsync(DeviceSide.Left, SelectedMemoryIndex, ct);
+                if (_session.RightConnected)
+                    await EnsureMemoryLoadedAsync(DeviceSide.Right, SelectedMemoryIndex, ct);
+                var (left, right) = _session.GetSnapshotsForMemory(SelectedMemoryIndex);
+
+                if (left != null && _session.LeftConnected)
+                    await SaveMemoryForSideToNvmAsync(product, conn, DeviceSide.Left, SelectedMemoryIndex, left, ct);
+                if (right != null && _session.RightConnected)
+                    await SaveMemoryForSideToNvmAsync(product, conn, DeviceSide.Right, SelectedMemoryIndex, right, ct);
+
+                RefreshSaveState();
+            }
+            finally
+            {
+                IsLoading = false;
+            }
+        }
+
+        public async Task SaveAllMemoriesToNvmAsync(bool onlyDirty, CancellationToken ct)
+        {
+            if (!HasActiveSession || IsOfflineMode) return;
+
+            var product = _session.SdkManager?.GetProduct();
+            var conn = _session.ConnectionService;
+            if (product == null || conn == null) return;
+
+            var dirtyTotal = _session.GetDirtyMemoryCount();
+            System.Diagnostics.Debug.WriteLine($"[NVM] SaveAll onlyDirty={onlyDirty.ToString().ToLowerInvariant()} totalDirty={dirtyTotal}");
+
+            IsLoading = true;
+            LoadingMessage = "Saving all memories to NVM…";
+            try
+            {
+                for (int memoryIndex = 0; memoryIndex < 8; memoryIndex++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    bool leftDirty = _session.IsMemoryDirty(DeviceSide.Left, memoryIndex);
+                    bool rightDirty = _session.IsMemoryDirty(DeviceSide.Right, memoryIndex);
+                    if (onlyDirty && !leftDirty && !rightDirty)
+                        continue;
+
+                    if (_session.LeftConnected)
+                        await EnsureMemoryLoadedAsync(DeviceSide.Left, memoryIndex, ct);
+                    if (_session.RightConnected)
+                        await EnsureMemoryLoadedAsync(DeviceSide.Right, memoryIndex, ct);
+
+                    var (left, right) = _session.GetSnapshotsForMemory(memoryIndex);
+                    if (_session.LeftConnected && left != null && (!onlyDirty || leftDirty))
+                        await SaveMemoryForSideToNvmAsync(product, conn, DeviceSide.Left, memoryIndex, left, ct);
+                    if (_session.RightConnected && right != null && (!onlyDirty || rightDirty))
+                        await SaveMemoryForSideToNvmAsync(product, conn, DeviceSide.Right, memoryIndex, right, ct);
+                }
+
+                RefreshSaveState();
+            }
+            finally
+            {
+                IsLoading = false;
+            }
+        }
+
+        private async Task SaveMemoryForSideAsync(
+            SDLib.IProduct product,
+            DeviceConnectionService conn,
+            DeviceSide side,
+            int memoryIndex,
+            DeviceSettingsSnapshot snapshot,
+            CancellationToken ct)
+        {
+            try
+            {
+                await DeviceInitializationService.EnsureInitializedAndConfiguredAsync(_session, side, ct);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[FittingVM] Save EnsureInit({side}) failed: {ex.Message}");
+                ScanDiagnostics.WriteLine($"[FittingVM] Save EnsureInit({side}) failed: " + ex.Message);
+                ErrorMessage = _session.LastConfigError ?? ex.Message;
+                return;
+            }
+
+            var adaptor = conn.GetConnection(side);
+            if (adaptor == null) return;
+
+            System.Diagnostics.Debug.WriteLine($"[Save] SaveCurrent memory={memoryIndex + 1} side={side}");
+            var ok = await _soundDesigner.WriteMemorySnapshotAsync(product, adaptor, snapshot, memoryIndex, null, ct);
+            if (ok)
+            {
+                _session.ClearMemoryDirty(side, memoryIndex);
+                _settingsCache.InvalidateCacheForSide(side);
+                // Allow device time to flush to NVM before any follow-up read or disconnect.
+                await Task.Delay(250, ct).ConfigureAwait(true);
+            }
+        }
+
+        /// <summary>NVM-only: Burn snapshot to NVM, verify, clear dirty, set status. Logs [NVM] Burn M# and [NVM] Verify M#.</summary>
+        private async Task SaveMemoryForSideToNvmAsync(
+            SDLib.IProduct product,
+            DeviceConnectionService conn,
+            DeviceSide side,
+            int memoryIndex,
+            DeviceSettingsSnapshot snapshot,
+            CancellationToken ct)
+        {
+            try
+            {
+                await DeviceInitializationService.EnsureInitializedAndConfiguredAsync(_session, side, ct);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[FittingVM] Save EnsureInit({side}) failed: {ex.Message}");
+                ScanDiagnostics.WriteLine($"[FittingVM] Save EnsureInit({side}) failed: " + ex.Message);
+                ErrorMessage = _session.LastConfigError ?? ex.Message;
+                return;
+            }
+
+            var adaptor = conn.GetConnection(side);
+            if (adaptor == null) return;
+
+            string? failureReason = null;
+            var ok = await _soundDesigner.BurnMemoryToNvmAsync(product, adaptor, snapshot, memoryIndex, null, ct, onWriteFailed: msg => failureReason = msg ?? failureReason);
+            if (!ok)
+            {
+                if (!string.IsNullOrEmpty(failureReason)) ErrorMessage = failureReason;
+                return;
+            }
+
+            var (verified, verifyMsg) = await _soundDesigner.VerifyMemoryMatchesNvmAsync(product, adaptor, snapshot, memoryIndex, maxItemsToCheck: 50, ct);
+            if (!verified && !string.IsNullOrEmpty(verifyMsg))
+            {
+                ErrorMessage = verifyMsg;
+                return;
+            }
+
+            _session.ClearMemoryDirty(side, memoryIndex);
+            _settingsCache.InvalidateCacheForSide(side);
+            _nvmSaveStatus = "Persisted to NVM";
+            OnPropertyChanged(nameof(FittingStatusText));
+
+            // Allow device time to flush to NVM before any follow-up read or disconnect.
+            await Task.Delay(250, ct).ConfigureAwait(true);
+        }
+
+        private void RefreshSaveState()
+        {
+            HasUnsavedChanges = _session.HasAnyDirtyMemory();
+            OnPropertyChanged(nameof(IsCurrentMemoryDirty));
+            OnPropertyChanged(nameof(HasAnyDirtyMemory));
+            OnPropertyChanged(nameof(SaveToDeviceToolTip));
+            OnPropertyChanged(nameof(SaveAllMemoriesToolTip));
+            OnPropertyChanged(nameof(FittingStatusText));
+            CommandManager.InvalidateRequerySuggested();
         }
 
         #endregion

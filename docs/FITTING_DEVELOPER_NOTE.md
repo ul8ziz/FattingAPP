@@ -13,6 +13,18 @@ When you **build** or **run** the app, nothing is hidden—output goes to specif
 
 **Summary:** Build errors → **Output, Build**. Runtime and device/save errors → **Output, Debug** when debugging, or **log.txt** next to the .exe when not. The toast in the app also shows save/connection failures.
 
+### SDK documentation rule (mandatory)
+
+All SoundDesigner SDK behavior (NVM Restore/Burn, Memory count and switching, Configure/Initialize sequence, Save and End, and any call that can trigger E_UNCONFIGURED_DEVICE or access violations) **must** be justified by the vendor docs in:
+
+`C:\Users\haifa\Downloads\Fatting_App\Ezairo Pre Suite Firmware, Sound Designer and SDK\SoundDesignerSDK\SoundDesignerSDK\documentation`
+
+- Before changing any workflow step, locate the relevant section in those docs and follow it.
+- In code, add a short comment with **doc filename + section/title** (e.g. `// sounddesigner_programmers_guide.pdf §6.3`).
+- If a required API or behavior is **not documented** there, do not implement it; log **"Not supported by docs"** and keep the feature disabled.
+
+See **`.cursor/rules/rules.mdc`** §0 for the full rule.
+
 ### Interpreting your debug output
 
 When you run with F5 and select **Output → Debug**, you may see the following. All of these are **expected** in normal runs:
@@ -25,49 +37,52 @@ When you run with F5 and select **Output → Debug**, you may see the following.
 | `[SoundDesigner] ReadParameters(kActiveMemory) error: E_UNCONFIGURED_DEVICE` | Expected when the device is unprogrammed. The app still builds the UI from the **library** (default/param file values); it does not read live values from the device. |
 | `[Right] Error: ErrorCode=E_SEND_FAILURE` / `[Right] --- port detection end ... Found=False` | No device on the Right port (or cable/hardware issue). Only the Left (or the side that succeeded) is used. |
 | `[FittingVM] Item cache built: 16 left tabs, 0 right tabs, 1088 left items total` | Fitting page loaded successfully; only the left device is connected. |
+| `[NVM] Restore M1` / `[NVM] Burn M1` / `[NVM] Verify M1 OK` | NVM-only flow: restore from NVM, burn to NVM, verify after save (per SDK sample presuite_memory_switch.py). |
+| `[NVM] Verify M# FAIL: ...` | Save verification failed after burn; parameter mismatch after read-back. Some parameters (e.g. **X_AuxiliaryAttenuation**) are skipped in verification on known device/firmware variance — see **KnownVerifySkipIds** in `SoundDesignerSettingsEnumerator`. |
 
 **Why “data not saved” or “settings didn’t change” when I save?** If the only connected device has **Serial=-1 or 0** (unprogrammed), the SDK will not accept writes. The app skips the write and shows: *"Device(s) unprogrammed (Serial=-1 or 0); save to device not available."* To actually save to the device, use a **programmed** hearing aid (non-zero Serial).
 
 ## Overview
 
-The Fitting page appears after a successful connection to a hearing aid (Left and/or Right) via HI-PRO and the Sound Designer SDK (sdnet.dll). It shows **all** device settings in a tabbed UI (13 tabs), supports **Live Mode** (debounced immediate write) and **Save to Device** (batch write with read-back). If only one side is connected, only that side’s UI card is shown.
+The Fitting page appears after a successful connection to a hearing aid (Left and/or Right) via HI-PRO and the Sound Designer SDK (sdnet.dll). It shows device settings in **dynamic tabs** derived from each parameter’s **LongModuleName** (one tab per module; e.g. 9 tabs for E7111V2), with a **Memory 1–8** selector. Only the selected memory is read from the device on first load; other memories load on demand when the user switches the selector. The page supports **Live Mode** (debounced immediate write) and **Save to Device** (batch write with read-back). If only one side is connected, only that side’s UI card is shown.
 
 ## How Settings Are Discovered (SDK)
 
 - **Initialization:** `SdkConfiguration.SetupEnvironment()`, then `SdkManager` with `sd.config` and `E7160SL.library`, then `IProduct` from the library. Same as Connect flow.
 - **Connection:** `DeviceSessionService` holds `SdkManager` and `DeviceConnectionService` after Connect. Fitting uses `ConnectionService.GetConnection(DeviceSide.Left/Right)` to get the `ICommunicationAdaptor` per side.
-- **Read:** `ISoundDesignerService.ReadAllSettingsAsync`:
-  1. Calls `IProduct.ReadFromDevice(adaptor)` via reflection (per Programmer’s Guide).
-  2. Builds snapshot via **SoundDesignerSettingsEnumerator.BuildFullSnapshot(product, side)**.
-- **Enumeration:** `SoundDesignerSettingsEnumerator`:
-  - Defines all 13 tab IDs/titles (QuickFit, Fine Tuning, User Controls, Experience Manager, Feedback Canceller, Frequency Lowering, Sound Manager, Tinnitus, Memories, Indicators, Fitting Summary, Data Log, Ready. Set. Hear.).
-  - Iterates `IProduct` with reflection: all public parameter-less methods and readable properties that return `IEnumerable` are invoked. Each collection element is inspected for properties such as Id, Name, DisplayName, ParameterId, Value, Unit, Min, Max, Step, ReadOnly, DataType, EnumValues and turned into a `SettingItem`.
-  - **Tab mapping:** SDK category/module/source name (e.g. method or property name) is mapped to a tab using `CategoryToTabId` and `MapCategoryToTabId`. Known names (e.g. "Feedback", "General", "Gain") map to the corresponding tab; unknown sources map to QuickFit. Add entries to `CategoryToTabId` in `SoundDesignerSettingsEnumerator.cs` when the SDK exposes module/category names.
-  - If the SDK provides parameter domains/modules (see **docs/sounddesigner_programmers_guide.pdf**), extend `EnumerateAllParameters` to call the documented API (e.g. GetParameterBlocks, GetParameters) and map by group ID or parameter name using the same tab mapping table.
-- **Result:** `DeviceSettingsSnapshot` with 13 `SettingCategory` items (one per tab), each containing `SettingSection` and `SettingItem` list. Each `SettingItem` has DisplayName, CurrentValue (Value), DataType, Unit, Min/Max/Step, ReadOnly, and ParameterId for read/write.
+- **Read:** The app uses **ReloadFromNvmAsync** when loading from device (on connect and memory switch) — logs `[NVM] Restore M#`, then **ReadMemorySnapshotAsync**, which:
+  1. Calls `TrySelectMemoryContext(product, memoryIndex)` (SwitchToMemory or SelectMemoryIndex via reflection) so the SDK targets the correct memory.
+  2. Calls `ReadParameters` for `kActiveMemory` and `kSystemActiveMemory` (BeginReadParameters / polling / GetResult()).
+  3. Builds the snapshot via **SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, memoryIndex, side)** (~595 parameters per memory).
+  **ReadAllSettingsAsync** is a backward-compatible wrapper that calls `ReadMemorySnapshotAsync(..., memoryIndex: 0)`.
+- **Enumeration:** **SoundDesignerSettingsEnumerator** builds one **SettingCategory** per distinct **LongModuleName** from the parameters (grouped in `BuildSnapshotForMemory`). Only modules that have parameters appear as tabs; there is no hardcoded list of 13 tabs. Parameters come from `Product.Memories[memoryIndex].Parameters` (and system memory where applicable). Each collection element is inspected for properties such as Id, Name, DisplayName, ParameterId, Value, Unit, Min, Max, Step, ReadOnly, DataType, EnumValues and turned into a `SettingItem`.
+- **Result:** `DeviceSettingsSnapshot` with one `SettingCategory` per module (dynamic count), each containing `SettingSection` and `SettingItem` list. Each `SettingItem` has DisplayName, CurrentValue (Value), DataType, Unit, Min/Max/Step, ReadOnly, and ParameterId for read/write.
 
 ## How Tab Mapping Is Determined
 
-- **SoundDesignerSettingsEnumerator** holds a static `CategoryToTabId` dictionary (category/module name → tab Id).
-- When parameters are enumerated from the product, the **source name** (method or property name that returned the collection) is used as the section title and mapped to a tab via `MapCategoryToTabId`. Substring matching is used (e.g. "FeedbackCanceller" in the name → Feedback Canceller tab).
-- To align with the SDK: if the Programmer’s Guide documents parameter group IDs or module names, add them to `CategoryToTabId` so parameters land in the correct tab.
+- **SoundDesignerSettingsEnumerator** builds one **SettingCategory** per distinct **LongModuleName** from the parameters (grouped in `BuildSnapshotForMemory`). Only modules that have parameters appear as tabs; there is no hardcoded list of tab IDs or titles.
+- Parameters are enumerated from **Product.Memories[memoryIndex].Parameters** (and system memory where applicable). The **source** for the tab title is each parameter’s **LongModuleName** (or ShortModuleName); no separate CategoryToTabId dictionary is used for the primary path.
+- To align with the SDK: if the Programmer’s Guide documents parameter group IDs or module names that differ from LongModuleName, extend the enumerator to use them while keeping tabs dynamic (one category per group/module).
 
 ## Live Mode and Save to Device
 
 - **Live Mode ON:** UI changes update the in-memory snapshot. A debounce timer (400 ms) triggers a single `WriteSettingsAsync` after the last change, so the device is not flooded.
 - **Live Mode OFF:** Changes stay local until the user clicks **Save to Device**.
-- **Save to Device:** Before writing, `SoundDesignerSettingsEnumerator.ApplySnapshotValuesToSdkParameters(snapshot)` applies the edited UI snapshot back to the SDK product's Parameter objects (so the device receives the user's changes; without this, `BeginWriteParameters` would send the product's previous in-memory state and "return to settings" would show old data). Then `WriteSettingsAsync` is called for each connected side (Left/Right), followed by read-back for verification and snapshot refresh. Full exception and stack trace are logged to `log.txt`; SDException is translated to a user-friendly message (e.g. E_SEND_FAILURE → "Communication error. Check cable and contacts.").
+- **Read (NVM-only):** On connect and memory load from device, the app uses **ReloadFromNvmAsync** (logs `[NVM] Restore M#`), which selects memory context then calls `ReadMemorySnapshotAsync` — semantics per SDK sample **presuite_memory_switch.py** (set CurrentMemory then ReadParameters loads NVM into RAM).
+- **Save (NVM-only):** **Save Current Memory** / **Save ALL Memories** call **BurnMemoryToNvmAsync** (logs `[NVM] Burn M#`) then **VerifyMemoryMatchesNvmAsync** (logs `[NVM] Verify M# OK/FAIL`). Only Burn to NVM counts as save; no separate "Write to RAM" is exposed. **Persistence after disconnect** requires the SDK to support an **NVM write** (e.g. `BeginWriteParameters(int memoryIndex)` or `ParameterSpace.kNvmMemoryN`). The app discovers this at runtime via reflection; if no NVM write API is found, it logs **"Not supported by docs: no NVM write API found; persistence may fail after disconnect."** and continues with RAM-only write—saved values may then not appear after reconnect. Status line shows **Persisted to NVM** after success.
+- **Reload from NVM:** Toolbar button reloads current memory from NVM (Restore + Read from RAM) for the selected memory.
 - **Partial failure:** If one side (e.g. Right) fails to load or write, the other (Left) still loads and displays; error message is shown for the failed side.
 
 ## Session-end save (variable saving) flow
 
-When the user chooses **Save to Device & End**, the full section that writes parameter (variable) values to the device is:
+When the user chooses **Save to Device & End**, the flow that writes parameter (variable) values to the device is:
 
-1. **SessionEndService** (`App.Services.SessionEndService`) — Orchestration: gets snapshots via `GetSnapshotsForSave()`, runs save on the UI thread via `InvokeAsync(Func<Task<(bool, string?)>>)` so the async save is fully awaited, then shows the toast from the **returned** result (no closure over locals). Unprogrammed devices (Serial=-1 or 0) are skipped and a clear message is returned.
-2. **SoundDesignerService.WriteSettingsAsync** (`Device.DeviceCommunication.SoundDesignerService`) — Applies the snapshot to the SDK product with `ApplySnapshotValuesToSdkParameters(snapshot)`, then calls `BeginWriteParameters` for `kActiveMemory` and `kSystemActiveMemory`; on failure invokes `onWriteFailed(message)`.
-3. **SoundDesignerSettingsEnumerator.ApplySnapshotValuesToSdkParameters** / **TrySetParameterValue** (`Device.DeviceCommunication.SoundDesignerSettingsEnumerator`) — Pushes each snapshot item’s value back into the SDK Parameter objects (`SdkParameterRef`) so `BeginWriteParameters` sends the user’s edits; without this, the device would receive stale in-memory state.
+1. **SessionEndService** — When the user chooses Save to Device & End, it calls **RunSaveAllOnDispatcherAsync(session, onlyDirty: true)** on the UI thread. That uses **BurnMemoryToNvmAsync** and **VerifyMemoryMatchesNvmAsync** per (side, memory) — NVM-only; logs `[NVM] Burn M#`, `[NVM] Verify M# OK/FAIL`. After success, waits 500 ms before ClearSessionAsync.
+2. **RunSaveAllOnDispatcherAsync** — For each dirty memory per side: **session.GetSnapshotsForMemory(memoryIndex)** → **SoundDesignerService.BurnMemoryToNvmAsync(...)** → **VerifyMemoryMatchesNvmAsync(...)** → ClearMemoryDirty on success.
+3. **BurnMemoryToNvmAsync** — Logs `[NVM] Burn M#`, then calls **WriteMemorySnapshotAsync** (TrySelectMemoryContext, BuildWritableSnapshotForMemory, ApplySnapshotValuesToSdkParameters, WriteParameters for RAM, then **NVM write when SDK exposes it**—e.g. BeginWriteParameters(memoryIndex) or ParameterSpace.kNvmMemoryN—per vendor sample **presuite_memory_switch.py**; if no NVM write is found by reflection, logs "Not supported by docs" and only RAM is written), read-back, verify.
+4. **SoundDesignerSettingsEnumerator.ApplySnapshotValuesToSdkParameters** / **TrySetParameterValue** — Pushes each snapshot item’s value back into the SDK Parameter objects (`SdkParameterRef`) so WriteParameters sends the user’s edits; without this, the device would receive stale in-memory state.
 
-So “variable saving” = snapshot values → ApplySnapshotValuesToSdkParameters (TrySetParameterValue per item) → BeginWriteParameters. The save **result** (success/failure reason) is returned from the dispatcher delegate and used for the toast; do not rely on closure or TaskCompletionSource when changing this flow.
+So “variable saving” = per (side, memory): GetSnapshotsForMemory → WriteMemorySnapshotAsync (TrySelectMemoryContext → BuildWritableSnapshotForMemory → ApplySnapshotValuesToSdkParameters → WriteParameters → verify) → ClearMemoryDirty on success. The save **result** (success/failure reason) is returned from the dispatcher delegate and used for the toast; do not rely on closure or TaskCompletionSource when changing this flow.
 
 ## Configure Device (Manufacturing)
 
@@ -80,7 +95,7 @@ So “variable saving” = snapshot values → ApplySnapshotValuesToSdkParameter
 | Session | `App.Services.DeviceSessionService` |
 | Configure Device flow | `App.Services.DeviceInitializationService` (RunConfigureDeviceAsync, EnsureLibraryMatchesFirmware, RunConfigureOneSideSync) |
 | Read/write | `Device.ISoundDesignerService` / `SoundDesignerService` |
-| Enumeration + tab mapping | `Device.SoundDesignerSettingsEnumerator` |
+| Enumeration + dynamic tabs from LongModuleName | `Device.SoundDesignerSettingsEnumerator` |
 | Models | `Device.Models`: `DeviceSettingsSnapshot`, `SettingCategory`, `SettingSection`, `SettingItem` (DisplayName, ParameterId, Value, DataType, Unit, Min, Max, Step, ReadOnly) |
 | Fitting UI | `App.Views.FittingView`, `App.ViewModels.FittingViewModel` |
 
@@ -106,9 +121,4 @@ Reflection helpers are marked with **`[DebuggerNonUserCode]`**. To inspect the r
 
 ## Extending for Full SDK Parameter API
 
-When the Programmer’s Guide documents the exact API (e.g. parameter blocks, domains, or module list):
-
-1. In **SoundDesignerSettingsEnumerator.EnumerateAllParameters**, call the documented methods (e.g. `product.GetParameterBlocks()`) and iterate the returned objects.
-2. Map each block’s category/group to a tab using `CategoryToTabId`.
-3. For each parameter object, fill `SettingItem` (Id, Name, DisplayName, ParameterId, Value, Unit, Min, Max, Step, ReadOnly, DataType, EnumValues) from the SDK types.
-4. Keep the reflection-based fallback so that products that expose parameters via other shapes still populate the 13 tabs.
+The current flow uses **Product.Memories** → **ParameterMemory** → **Parameters** and groups by **LongModuleName** in **BuildSnapshotForMemory**. If the Programmer’s Guide documents a different API (e.g. parameter blocks, domains, or module list), extend the enumerator to call it and continue grouping by LongModuleName (or equivalent) so tabs remain dynamic. Keep the reflection-based fallback so that products that expose parameters via other shapes still populate the same snapshot structure.

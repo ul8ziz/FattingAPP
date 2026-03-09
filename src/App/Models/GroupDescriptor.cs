@@ -12,12 +12,16 @@ namespace Ul8ziz.FittingApp.App.Models
         private string _title = string.Empty;
         private int _paramsCount;
         private bool _isLoaded;
+        private bool _isExpanded = true;
         private ObservableCollection<SettingItemViewModel> _rows = new ObservableCollection<SettingItemViewModel>();
 
         public string Id { get => _id; set { _id = value ?? ""; OnPropertyChanged(); } }
         public string Title { get => _title; set { _title = value ?? ""; OnPropertyChanged(); } }
         public int ParamsCount { get => _paramsCount; set { _paramsCount = value; OnPropertyChanged(); } }
         public bool IsLoaded { get => _isLoaded; set { _isLoaded = value; OnPropertyChanged(); } }
+
+        /// <summary>Whether the group Expander is expanded. Default true so groups open by default.</summary>
+        public bool IsExpanded { get => _isExpanded; set { _isExpanded = value; OnPropertyChanged(); } }
 
         /// <summary>Row VMs for this group; populated when group is expanded. Assign once on UI thread.</summary>
         public ObservableCollection<SettingItemViewModel> Rows { get => _rows; set { _rows = value ?? new ObservableCollection<SettingItemViewModel>(); OnPropertyChanged(); } }

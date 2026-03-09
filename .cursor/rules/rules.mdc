@@ -13,6 +13,27 @@ All suggestions MUST align with the existing structure.
 
 ---
 
+## 0. SoundDesigner SDK — Documentation Rule (Mandatory)
+
+Always cross-check **SoundDesignerSDK** behavior and terminology (Memories, Restore/Burn semantics, Configure/Initialize sequence, supported APIs) directly from the **local vendor docs folder**:
+
+**Path:** `C:\Users\haifa\Downloads\Fatting_App\Ezairo Pre Suite Firmware, Sound Designer and SDK\SoundDesignerSDK\SoundDesignerSDK\documentation`
+
+**Requirements:**
+
+- **Before** implementing or changing any workflow step (Configure / Connect / Read / Write / Restore / Burn / Memory switching), locate the relevant section in the docs under that folder and follow it.
+- When adding or modifying code that touches the SDK, include a **short comment** with the **doc filename + section/title** that justifies the behavior (e.g. `// sounddesigner_programmers_guide.pdf §6.3 InitializeDevice`). No guessing.
+- If a needed function or behavior is **not documented** in that folder, do **NOT** implement it; instead log **"Not supported by docs"** and keep the feature disabled.
+
+**Apply this rule specifically to:**
+
+- NVM-only save policy (Restore from NVM, Burn to NVM, Burn All to NVM)
+- Memory switching behavior and Memory count
+- Session end "Save and End" default action
+- Any SDK calls that can trigger `E_UNCONFIGURED_DEVICE` or access violations (e.g. thread affinity, InitializeDevice/ConfigureDevice order)
+
+---
+
 ## 1. Mandatory Behavior (Non-Negotiable)
 
 - You MUST read and understand existing code before suggesting changes.
