@@ -18,6 +18,9 @@ namespace Ul8ziz.FittingApp.App.Views
     {
         private MainViewModel _viewModel;
         private ConnectDevicesView? _cachedConnectDevicesView;
+        // AudiogramView is cached so the AudiogramViewModel (and its per-memory audiogram data) survives navigation.
+        // Creating a new AudiogramView on every navigation would recreate the VM and lose all entered clinical data.
+        private AudiogramView? _cachedAudiogramView;
 
         public MainView()
         {
@@ -38,6 +41,19 @@ namespace Ul8ziz.FittingApp.App.Views
                     };
                 }
                 return _cachedConnectDevicesView;
+            };
+            _viewModel.CreateAudiogramView = () =>
+            {
+                if (_cachedAudiogramView == null)
+                {
+                    _cachedAudiogramView = new AudiogramView(navKey =>
+                    {
+                        if (!AppSessionState.Instance.IsNavigationEnabled) return;
+                        _viewModel.CurrentNavKey = navKey;
+                        _viewModel.CurrentView   = navKey == "Fitting" ? (UserControl)new FittingView() : GetOrCreateAudiogramView();
+                    });
+                }
+                return _cachedAudiogramView;
             };
             _viewModel.ShowEndSessionDialog = () =>
             {
@@ -106,6 +122,9 @@ namespace Ul8ziz.FittingApp.App.Views
             };
         }
 
+        private AudiogramView GetOrCreateAudiogramView() =>
+            _viewModel.CreateAudiogramView?.Invoke() ?? new AudiogramView();
+
         private void NavigateToConnectDevices()
         {
             _viewModel.CurrentNavKey = "ConnectDevices";
@@ -164,6 +183,11 @@ namespace Ul8ziz.FittingApp.App.Views
         }
 
         public Func<ConnectDevicesView>? CreateConnectView { get; set; }
+        /// <summary>
+        /// Factory injected by MainView. Returns the single cached AudiogramView instance so the
+        /// AudiogramViewModel (and its per-memory clinical data) survive sidebar navigation.
+        /// </summary>
+        public Func<AudiogramView>? CreateAudiogramView { get; set; }
         public Func<EndSessionDialogResult>? ShowEndSessionDialog { get; set; }
         public Action? NavigateToConnectAndRestartDiscovery { get; set; }
         public Action<string>? ShowToast { get; set; }
@@ -236,12 +260,15 @@ namespace Ul8ziz.FittingApp.App.Views
 
         private void Navigate(string viewName)
         {
-            if (!AppSessionState.Instance.IsNavigationEnabled && viewName != "ConnectDevices" && viewName != "Audiogram")
+            // Audiogram, Fitting, and SessionSummary all require an active device connection.
+            // Only Connect Devices is allowed without a connection.
+            if (!AppSessionState.Instance.IsNavigationEnabled && viewName != "ConnectDevices")
                 return;
             UserControl? newView = viewName switch
             {
                 "ConnectDevices" => CreateConnectView?.Invoke() ?? new ConnectDevicesView(),
-                "Audiogram" => new AudiogramView(),
+                // Return the SAME cached AudiogramView each time so its VM and per-memory data survive navigation.
+                "Audiogram" => CreateAudiogramView?.Invoke() ?? new AudiogramView(),
                 "Fitting" => new FittingView(),
                 "SessionSummary" => new UserControl
                 {

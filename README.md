@@ -191,6 +191,13 @@ The app now follows a **memory-aware, library-first** workflow specifically desi
    - **PlotControl** (`Views/Controls/PlotControl.xaml`): WPF-native lightweight plot (axes, grid, multiple series). **GraphsPanelViewModel** uses debounced updates (≈100 ms) and virtualized curve list. Works in **offline** (library) and **live** (device) modes.
    - **E7111V2 graph mapping**: `GraphParameterMap.json` includes entries for **E7111V2** and **E7111V2.library** with WDRC gain param IDs (`X_WDRC_LowLevelGain`, `X_WDRC_HighLevelGain`) for Freq. Gain levels (40–100 dB) and I/O frequencies (1000–6500 Hz), so the Audiogram graphs show real data when an E7111V2 session is active. **Parameter list export**: When the Graphs panel receives a snapshot for E7111V2, the app writes **ParameterIds_E7111V2.txt** once per session to the app base directory (Id, Name, ModuleName per parameter) for mapping discovery or debugging.
 
+**Audiogram module:** The **Audiogram** screen (sidebar) provides a clinical input layer that flows into fitting:
+- **Input:** Threshold table (standard frequencies 250–8000 Hz) and audiogram chart (Hz vs dB HL) for left/right ear; optional Load/Save audiogram to JSON file.
+- **Validation:** `IAudiogramValidationService` checks frequency set, range (dB HL), and completeness; results shown in the UI.
+- **Prescription:** `IPrescriptionEngine` (currently a stub returning flat 0 dB targets) is the extension point for NAL-NL2/DSL-v5; no medical formulas until required and documented.
+- **Apply to Fitting:** Prescription targets are mapped to E7111V2 WDRC parameters via `IParameterMappingService` (using `GraphParameterMap.json`); **Apply to Fitting** updates the session snapshot (per side/memory), marks memory dirty, and refreshes the graphs panel. Save to device remains on the Fitting page or Session End (single save path; no duplicate SDK write).
+- **Graph verification:** Left panel shows existing Freq. Gain / I/O from session; threshold curve can be plotted in the audiogram chart. All SDK behavior follows the documentation rule (see **.cursor/rules/rules.mdc** §0 and **docs/FITTING_DEVELOPER_NOTE.md**).
+
 7. **TryGetValueDirect (reflection fix)**: The `_failedGetters` cache in `SoundDesignerSettingsEnumerator` caused cross-contamination: marking `BooleanValue` as "failed" for a Double parameter blocked it for all subsequent Boolean parameters (since all SDK Parameters share one .NET Type). Value-specific properties now use `TryGetValueDirect()` which bypasses the global cache.
 
 **Fitting performance plan (Sound Designer–style):** To avoid slow UI and dispatcher storms with large parameter sets, the Fitting page uses:
@@ -482,6 +489,78 @@ To build a **runnable, self-contained** version that you can copy to another PC 
 - **Added:** `DiagnosticsReport.md` — HI-PRO diagnostic report template.
 - **Added:** `src/Tools/Ftd2xxTest/`, `src/Tools/HiproD2xxProbe/` — D2XX probe console apps.
 - **Modified:** `Ul8ziz.FittingApp.sln` — Tools projects.
+
+## Recent Changes
+
+### Audiogram Screen Redesign (2026-03-09)
+
+Complete replacement of the Audiogram screen with a clinical-style UI matching the agreed design:
+
+**UI changes:**
+- Removed: GraphsPanelView (frequency-gain/I-O charts) from the Audiogram screen
+- Added: Two interactive clinical audiogram charts side-by-side (Right Ear / Left Ear) drawn on a WPF Canvas with log-scale frequency axis (250–8000 Hz) and inverted dB HL axis (−10 to 120 dB)
+- Added: Memory selector (Memory 1–8) synchronized with the Fitting screen via `DeviceSessionService.SelectedMemoryIndex`
+- Added: Center tool panel with input mode buttons: AC / BC / UCL / Masked / No Response / PTA
+- Added: Separate numeric views per ear (AC, BC, UCL rows × 8 standard frequency columns)
+- Added: `Generate WDRC` button replacing the old "Run prescription" + "Apply to Fitting" flow
+- Added: `Open Fitting` button navigating to the Fitting screen while preserving selected memory
+- Removed: Validate / Run prescription / Apply to Fitting / Refresh graphs buttons
+
+**Architecture changes:**
+- `AudiogramPoint.cs` — added `AudiogramPointType` enum (AC, BC, UCL) and `PointType` property (backward-compatible, defaults to AC)
+- `AudiogramTypeRowViewModel.cs` — new per-ear row VM with 8 frequency value columns and AC/BC/UCL row types
+- `AudiogramChartPoint.cs` — new display model for chart point rendering
+- `AudiogramChartControl.xaml/.cs` — new clinical Canvas chart control with click-to-plot interaction and symbol rendering (circle=AC, bracket=BC, triangle=UCL)
+- `AudiogramViewModel.cs` — rewritten: memory sync via `DeviceSessionService.PropertyChanged`, chart click handlers, Generate WDRC pipeline, Open Fitting navigation callback, Clear/Copy per ear
+- `AudiogramView.xaml` — complete replacement matching clinical design
+- `AudiogramView.xaml.cs` — accepts `Action<string> requestNavigate` callback
+- `MainView.xaml.cs` — injects navigation callback when creating `AudiogramView`
+
+**Memory synchronization:** Both Audiogram and Fitting screens read/write `DeviceSessionService.SelectedMemoryIndex` — no duplicated state.
+
+---
+
+### Audiogram Data Persists Across Navigation (2026-03-09)
+
+**Root cause:** `MainViewModel.Navigate("Audiogram")` was calling `new AudiogramView(...)` on every sidebar click, creating a new `AudiogramViewModel` instance each time. The `_audioSessionsByMemory` dictionary lives inside the VM, so all entered clinical data was destroyed on every navigation away from the Audiogram screen.
+
+**Fix:** `MainView.xaml.cs` now caches `_cachedAudiogramView` using the same pattern already used for `_cachedConnectDevicesView`. A `CreateAudiogramView` factory is injected into `MainViewModel`. `Navigate("Audiogram")` now returns the same cached instance on every call — the `AudiogramViewModel` and its data survive all navigation events. The navigation callback inside the factory also uses `GetOrCreateAudiogramView()` so "Open Fitting → Back to Audiogram" reuses the same instance.
+
+**Files changed:** `src/App/Views/MainView.xaml.cs`
+
+---
+
+### Audiogram Connected-Device Filtering + Per-Memory Storage (2026-03-09)
+
+**Fixes applied to `AudiogramViewModel.cs` and `AudiogramView.xaml`:**
+
+**Device availability rules:**
+- `IsAudiogramEnabled` property now gates Generate WDRC button and reports in diagnostics — true only when `ConnectedLeft || ConnectedRight`
+- Right ear panels are hidden and not targeted when only the left device is physically connected
+- Disconnected physical devices (e.g. Right reporting `E_SEND_FAILURE`) are never treated as active targets
+- On device disconnect, stale context is logged and cleared; audiogram data is retained in memory store
+- On device reconnect, audiogram data for the current memory is automatically re-populated if it was previously entered
+
+**Per-memory audiogram storage:**
+- `_audioSessionsByMemory: Dictionary<int, AudiogramSession>` stores clinical data per memory index (0-based)
+- Switching memory auto-saves the current UI state then loads saved data for the target memory
+- If no data exists for a memory, a clean empty clinical state is shown with an informational message
+- Memory index 0 = "Memory 1" (UI label) = `kNvmMemory1` (SDK ParameterSpace) — mapping is explicit and consistent
+
+**Generate WDRC corrections:**
+- Validates connected-device snapshot availability before proceeding — aborts with a clear message if no snapshot
+- Applies parameter updates only to sides with a physical connection AND a valid snapshot in `DeviceSessionService`
+- Saves the current UI audiogram state to `_audioSessionsByMemory` before generating (so the audiogram is consistent with the generated WDRC)
+
+**Diagnostics added (visible in Debug Output / log.txt):**
+- `[Audiogram] GenerateWDRC START` — logs UI memory label, internal index, SDK ParameterSpace, connected sides
+- `[Audiogram] Snapshots for MemoryN` — logs snapshot availability per side
+- `[Audiogram] Mapping result` — logs number of parameter updates and library key
+- `[Audiogram] Applied N updates to Left/Right` — logs exact side, memory label, index, SDK space
+- `[Audiogram] Memory switched/synced` — logs old index, new index, SDK space
+- `[Audiogram] Device connected/disconnected` — logs sides and active memory context
+
+---
 
 ## Notes
 

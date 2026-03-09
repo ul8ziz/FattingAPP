@@ -265,13 +265,13 @@
                                 </Button.Content>
                             </Button>
 
-                            <!-- Audiogram (Graphs: Freq Gain, I/O) - always available; uses session data when connected or library loaded -->
+                            <!-- Audiogram — requires a connected hearing aid (same guard as Fitting) -->
                             <Button Style="{StaticResource SidebarNavButtonAudiogramStyle}"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Audiogram"
-                                    IsEnabled="True"
+                                    IsEnabled="{Binding IsNavigationEnabled}"
                                     Margin="0,0,0,4"
-                                    ToolTip="Graphs: Frequency Gain, I/O">
+                                    ToolTip="Connect a hearing aid to enable Audiogram">
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>

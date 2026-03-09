@@ -5,10 +5,14 @@ namespace Ul8ziz.FittingApp.App.Views
 {
     public partial class AudiogramView : UserControl
     {
-        public AudiogramView()
+        /// <param name="requestNavigate">
+        /// Optional navigation callback injected by MainView.
+        /// Called with "Fitting" when the user clicks Open Fitting.
+        /// </param>
+        public AudiogramView(Action<string>? requestNavigate = null)
         {
             InitializeComponent();
-            DataContext = new ViewModels.AudiogramViewModel();
+            DataContext = new ViewModels.AudiogramViewModel(requestNavigate);
             Loaded += OnLoaded;
         }
 
@@ -16,7 +20,7 @@ namespace Ul8ziz.FittingApp.App.Views
         {
             try
             {
-                (DataContext as ViewModels.AudiogramViewModel)?.SetDataSourceFromSession();
+                (DataContext as ViewModels.AudiogramViewModel)?.PopulateFromSession();
             }
             catch (Exception ex)
             {

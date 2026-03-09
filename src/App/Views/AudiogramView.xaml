@@ -3,41 +3,590 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             xmlns:views="clr-namespace:Ul8ziz.FittingApp.App.Views"
+             xmlns:controls="clr-namespace:Ul8ziz.FittingApp.App.Views.Controls"
+             xmlns:vm="clr-namespace:Ul8ziz.FittingApp.App.ViewModels"
              mc:Ignorable="d"
-             d:DesignHeight="600" d:DesignWidth="900"
+             d:DesignHeight="740" d:DesignWidth="1060"
              Background="{StaticResource BackgroundBrush}">
+
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="../Styles/Styles.xaml"/>
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- Converters -->
+            <vm:InverseBoolConverter x:Key="InverseBoolConverter"/>
+            <vm:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+
+            <!-- Symbol-row toggle style: used for AC / BC / UCL rows inside the bordered grid.
+                 Full-width, no border of its own; outer container provides the border. -->
+            <Style x:Key="SymbolRowToggleStyle" TargetType="ToggleButton">
+                <Setter Property="Cursor"                       Value="Hand"/>
+                <Setter Property="Background"                   Value="White"/>
+                <Setter Property="BorderThickness"              Value="0"/>
+                <Setter Property="HorizontalContentAlignment"   Value="Stretch"/>
+                <Setter Property="VerticalContentAlignment"     Value="Center"/>
+                <Setter Property="FocusVisualStyle"             Value="{x:Null}"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border x:Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    BorderThickness="0"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="#DBEAFE"/>
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="#EFF6FF"/>
+                                </Trigger>
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsChecked"   Value="True"/>
+                                        <Condition Property="IsMouseOver" Value="True"/>
+                                    </MultiTrigger.Conditions>
+                                    <Setter TargetName="Bd" Property="Background" Value="#BFDBFE"/>
+                                </MultiTrigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Tool-panel toggle button style -->
+            <Style x:Key="ToolToggleStyle" TargetType="ToggleButton">
+                <Setter Property="FontFamily"  Value="Segoe UI"/>
+                <Setter Property="FontSize"    Value="12"/>
+                <Setter Property="Height"      Value="30"/>
+                <Setter Property="Cursor"      Value="Hand"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+                <Setter Property="Background"  Value="White"/>
+                <Setter Property="Foreground"  Value="{StaticResource TextPrimaryBrush}"/>
+                <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border x:Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4" Padding="8,4">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource PrimaryBrush}"/>
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
+                                </Trigger>
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsChecked"   Value="True"/>
+                                        <Condition Property="IsMouseOver" Value="True"/>
+                                    </MultiTrigger.Conditions>
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource PrimaryBrush}"/>
+                                </MultiTrigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Numeric table DataGrid style -->
+            <Style x:Key="NumericGridStyle" TargetType="DataGrid">
+                <Setter Property="AutoGenerateColumns"  Value="False"/>
+                <Setter Property="IsReadOnly"           Value="False"/>
+                <Setter Property="CanUserAddRows"       Value="False"/>
+                <Setter Property="CanUserDeleteRows"    Value="False"/>
+                <Setter Property="CanUserResizeRows"    Value="False"/>
+                <Setter Property="CanUserReorderColumns" Value="False"/>
+                <Setter Property="HeadersVisibility"    Value="Column"/>
+                <Setter Property="GridLinesVisibility"  Value="All"/>
+                <Setter Property="RowHeight"            Value="26"/>
+                <Setter Property="FontSize"             Value="11"/>
+                <Setter Property="FontFamily"           Value="Segoe UI"/>
+                <Setter Property="BorderThickness"      Value="1"/>
+                <Setter Property="BorderBrush"          Value="{StaticResource BorderBrush}"/>
+                <Setter Property="Background"           Value="White"/>
+                <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource BorderBrush}"/>
+                <Setter Property="VerticalGridLinesBrush"   Value="{StaticResource BorderBrush}"/>
+            </Style>
+
+            <!-- Frequency column header style -->
+            <Style x:Key="FreqHeaderStyle" TargetType="DataGridColumnHeader">
+                <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                <Setter Property="FontSize"    Value="10"/>
+                <Setter Property="FontFamily"  Value="Segoe UI"/>
+                <Setter Property="Foreground"  Value="{StaticResource TextSecondaryBrush}"/>
+                <Setter Property="Background"  Value="{StaticResource Gray100Brush}"/>
+                <Setter Property="Padding"     Value="4,3"/>
+            </Style>
+
+            <!-- Numeric cell text column (centered) -->
+            <Style x:Key="NumCellStyle" TargetType="DataGridCell">
+                <Setter Property="TextBlock.TextAlignment" Value="Center"/>
+            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <Grid Margin="24,16">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
+    <!-- ═══ Outer scroll wrapper ═══ -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+        <StackPanel Margin="20,14,20,20">
 
-        <!-- Graphs panel (left) -->
-        <views:GraphsPanelView Grid.Column="0" Width="320" Margin="0,0,16,0"
-                               DataContext="{Binding GraphsPanelViewModel}"/>
+            <!-- ═══ HEADER ROW: Title + Memory selector ═══ -->
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-        <!-- Main area: Audiogram placeholder + note -->
-        <Border Grid.Column="1" Style="{StaticResource CardStyle}" Padding="24">
-            <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="Audiogram" Style="{StaticResource Heading1Style}" Margin="0,0,0,8"/>
-                <TextBlock Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" MaxWidth="400" Margin="0,0,0,16">
-                    <Run Text="Graphs (Frequency Gain, I/O) are in the left panel. Use Refresh to update from the current session cache."/>
-                </TextBlock>
-                <Button Command="{Binding RefreshFromSessionCommand}"
-                        Style="{StaticResource SecondaryButtonStyle}"
-                        Padding="14,8" HorizontalAlignment="Left">
-                    <TextBlock Text="Refresh graphs from session" VerticalAlignment="Center" FontSize="13"/>
-                </Button>
+                <TextBlock Text="Audiogram"
+                           Style="{StaticResource Heading1Style}"
+                           VerticalAlignment="Center"/>
+
+                <!-- Memory selector — bound to shared DeviceSessionService state -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Memory:"
+                               Style="{StaticResource BodyTextStyle}"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0"
+                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                    <ComboBox ItemsSource="{Binding MemoryDisplayNames}"
+                              SelectedIndex="{Binding SelectedMemoryIndex, Mode=TwoWay}"
+                              Width="120"
+                              FontFamily="Segoe UI"
+                              FontSize="13"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- ═══ NO-CONNECTION SAFETY BANNER (shown if session ends while on this screen) ═══ -->
+            <Border Margin="0,0,0,10"
+                    Background="#FFF3CD"
+                    BorderBrush="#FBBF24"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="14,10"
+                    Visibility="{Binding ShowNoConnectionMessage, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#x26A0;" FontSize="16" Foreground="#92400E" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="Connect a hearing aid to enable Audiogram."
+                               FontFamily="Segoe UI" FontSize="13"
+                               Foreground="#92400E" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ CHART AREA: Right chart | Tool panel | Left chart ═══ -->
+            <Border Style="{StaticResource CardStyle}" Padding="12" Margin="0,0,0,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="100"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- RIGHT EAR CHART — shown only when right hearing aid is connected -->
+                    <StackPanel Grid.Column="0"
+                                Visibility="{Binding IsRightEarEnabled, Converter={StaticResource BoolToVisibility}}">
+                        <controls:AudiogramChartControl
+                            Title="Right Ear"
+                            EarSide="Right"
+                            Points="{Binding RightEarChartPoints}"
+                            ChartClickCommand="{Binding RightChartClickCommand}"
+                            Height="220"/>
+
+                        <!-- Under right chart: Clear Right + Copy >> -->
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <Button Content="Clear Right"
+                                    Command="{Binding ClearRightCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Padding="10,5" Margin="0,0,6,0"/>
+                            <Button Content="Copy >>"
+                                    Command="{Binding CopyRightToLeftCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Padding="10,5"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- CENTER TOOL PANEL — clinical symbol mode selector -->
+                    <Border Grid.Column="1" Margin="8,0"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Background="White"
+                            Padding="5,8">
+                        <StackPanel>
+
+                            <!-- ── AC / BC / UCL symbol grid ── -->
+                            <!-- Each row: [Right-ear symbol] [Type label] [Left-ear symbol]
+                                 Clicking a row selects that input mode.
+                                 Red = right ear convention; Blue = left ear convention. -->
+                            <Border BorderBrush="#7EB3D8"
+                                    BorderThickness="1.5"
+                                    CornerRadius="4"
+                                    ClipToBounds="True"
+                                    Margin="0,0,0,8">
+                                <StackPanel>
+
+                                    <!-- AC row -->
+                                    <ToggleButton IsChecked="{Binding ModeIsAC, Mode=OneWay}"
+                                                  Command="{Binding SetInputModeCommand}"
+                                                  CommandParameter="AC"
+                                                  Height="28"
+                                                  Padding="2,0"
+                                                  Style="{StaticResource SymbolRowToggleStyle}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="34"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="O"
+                                                       FontFamily="Segoe UI" FontSize="15" FontWeight="Bold"
+                                                       Foreground="#CC2222"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="AC"
+                                                       FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="2" Text="X"
+                                                       FontFamily="Segoe UI" FontSize="13" FontWeight="Bold"
+                                                       Foreground="#1E3EAA"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </ToggleButton>
+
+                                    <Rectangle Height="1" Fill="{StaticResource BorderBrush}"/>
+
+                                    <!-- BC row -->
+                                    <ToggleButton IsChecked="{Binding ModeIsBC, Mode=OneWay}"
+                                                  Command="{Binding SetInputModeCommand}"
+                                                  CommandParameter="BC"
+                                                  Height="28"
+                                                  Padding="2,0"
+                                                  Style="{StaticResource SymbolRowToggleStyle}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="34"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="&#x3C;"
+                                                       FontFamily="Segoe UI" FontSize="15" FontWeight="Bold"
+                                                       Foreground="#CC2222"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="BC"
+                                                       FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="2" Text="&#x3E;"
+                                                       FontFamily="Segoe UI" FontSize="15" FontWeight="Bold"
+                                                       Foreground="#1E3EAA"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </ToggleButton>
+
+                                    <Rectangle Height="1" Fill="{StaticResource BorderBrush}"/>
+
+                                    <!-- UCL row -->
+                                    <ToggleButton IsChecked="{Binding ModeIsUCL, Mode=OneWay}"
+                                                  Command="{Binding SetInputModeCommand}"
+                                                  CommandParameter="UCL"
+                                                  Height="28"
+                                                  Padding="2,0"
+                                                  Style="{StaticResource SymbolRowToggleStyle}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="34"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="U"
+                                                       FontFamily="Segoe UI" FontSize="14" FontWeight="Bold"
+                                                       Foreground="#CC2222"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="UCL"
+                                                       FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="2" Text="U"
+                                                       FontFamily="Segoe UI" FontSize="14" FontWeight="Bold"
+                                                       Foreground="#1E3EAA"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </ToggleButton>
+
+                                </StackPanel>
+                            </Border>
+
+                            <!-- ── Masked ── -->
+                            <ToggleButton Content="Masked"
+                                          IsChecked="{Binding ModeIsMasked, Mode=OneWay}"
+                                          Command="{Binding SetInputModeCommand}"
+                                          CommandParameter="Masked"
+                                          Style="{StaticResource ToolToggleStyle}"
+                                          FontSize="11"
+                                          Height="28"
+                                          Margin="0,0,0,5"/>
+
+                            <!-- ── No Response ── -->
+                            <ToggleButton Content="No Response"
+                                          IsChecked="{Binding ModeIsNoResponse, Mode=OneWay}"
+                                          Command="{Binding SetInputModeCommand}"
+                                          CommandParameter="NoResponse"
+                                          Style="{StaticResource ToolToggleStyle}"
+                                          FontSize="11"
+                                          Height="28"
+                                          Margin="0,0,0,10"/>
+
+                            <!-- ── PTA display: Right ear | Left ear ── -->
+                            <!-- Shows the Pure Tone Average (500/1000/2000 Hz AC) for each connected ear.
+                                 Red = right ear, Blue = left ear. "N/A" if insufficient threshold data. -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="5"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0"
+                                        BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        Background="White"
+                                        Padding="3,5">
+                                    <StackPanel>
+                                        <TextBlock Text="PTA"
+                                                   FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                                   HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding RightPtaText}"
+                                                   FontFamily="Segoe UI" FontSize="10"
+                                                   Foreground="#CC2222"
+                                                   HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Column="2"
+                                        BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        Background="White"
+                                        Padding="3,5">
+                                    <StackPanel>
+                                        <TextBlock Text="PTA"
+                                                   FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                                   HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding LeftPtaText}"
+                                                   FontFamily="Segoe UI" FontSize="10"
+                                                   Foreground="#1E3EAA"
+                                                   HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                        </StackPanel>
+                    </Border>
+
+                    <!-- LEFT EAR CHART — shown only when left hearing aid is connected -->
+                    <StackPanel Grid.Column="2"
+                                Visibility="{Binding IsLeftEarEnabled, Converter={StaticResource BoolToVisibility}}">
+                        <controls:AudiogramChartControl
+                            Title="Left Ear"
+                            EarSide="Left"
+                            Points="{Binding LeftEarChartPoints}"
+                            ChartClickCommand="{Binding LeftChartClickCommand}"
+                            Height="220"/>
+
+                        <!-- Under left chart: << Copy + Clear Left -->
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0" HorizontalAlignment="Right">
+                            <Button Content="&lt;&lt; Copy"
+                                    Command="{Binding CopyLeftToRightCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Padding="10,5" Margin="0,0,6,0"/>
+                            <Button Content="Clear Left"
+                                    Command="{Binding ClearLeftCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Padding="10,5"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- ═══ NUMERIC VIEW AREA ═══ -->
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- RIGHT EAR NUMERIC VIEW — visible only when right hearing aid is connected -->
+                <Border Grid.Column="0" Style="{StaticResource CardStyle}" Padding="12,10"
+                        Visibility="{Binding IsRightEarEnabled, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="Right Ear — Numeric View"
+                                   Style="{StaticResource Heading2Style}"
+                                   FontSize="13"
+                                   Margin="0,0,0,8"/>
+                        <DataGrid ItemsSource="{Binding RightEarRows}"
+                                  Style="{StaticResource NumericGridStyle}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="" Binding="{Binding RowLabel}"
+                                                    IsReadOnly="True" Width="36">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                                            <Setter Property="FontWeight"          Value="SemiBold"/>
+                                            <Setter Property="FontSize"            Value="11"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="250"  Binding="{Binding Val250, UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="500"  Binding="{Binding Val500, UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="1k"   Binding="{Binding Val1k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="2k"   Binding="{Binding Val2k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="3k"   Binding="{Binding Val3k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="4k"   Binding="{Binding Val4k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="6k"   Binding="{Binding Val6k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="8k"   Binding="{Binding Val8k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Right table actions -->
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button Content="Clear Right"
+                                    Command="{Binding ClearRightCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Padding="10,4" Margin="0,0,6,0" FontSize="11"/>
+                            <Button Content="Copy >>"
+                                    Command="{Binding CopyRightToLeftCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Padding="10,4" FontSize="11"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- LEFT EAR NUMERIC VIEW — visible only when left hearing aid is connected -->
+                <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="12,10"
+                        Visibility="{Binding IsLeftEarEnabled, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="Left Ear — Numeric View"
+                                   Style="{StaticResource Heading2Style}"
+                                   FontSize="13"
+                                   Margin="0,0,0,8"/>
+                        <DataGrid ItemsSource="{Binding LeftEarRows}"
+                                  Style="{StaticResource NumericGridStyle}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="" Binding="{Binding RowLabel}"
+                                                    IsReadOnly="True" Width="36">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                                            <Setter Property="FontWeight"          Value="SemiBold"/>
+                                            <Setter Property="FontSize"            Value="11"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="250"  Binding="{Binding Val250, UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="500"  Binding="{Binding Val500, UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="1k"   Binding="{Binding Val1k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="2k"   Binding="{Binding Val2k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="3k"   Binding="{Binding Val3k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="4k"   Binding="{Binding Val4k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="6k"   Binding="{Binding Val6k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                                <DataGridTextColumn Header="8k"   Binding="{Binding Val8k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Left table actions -->
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0" HorizontalAlignment="Right">
+                            <Button Content="&lt;&lt; Copy"
+                                    Command="{Binding CopyLeftToRightCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Padding="10,4" Margin="0,0,6,0" FontSize="11"/>
+                            <Button Content="Clear Left"
+                                    Command="{Binding ClearLeftCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Padding="10,4" FontSize="11"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ═══ BOTTOM ACTION BAR ═══ -->
+            <Border Style="{StaticResource CardStyle}" Padding="14,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Save Audiogram — requires connected device and not currently generating -->
+                    <Button Grid.Column="0"
+                            Content="Save Audiogram"
+                            Command="{Binding SaveAudiogramCommand}"
+                            Style="{StaticResource SuccessButtonStyle}"
+                            Padding="16,8"
+                            IsEnabled="{Binding IsGeneratingWdrc, Converter={StaticResource InverseBoolConverter}}"/>
+
+                    <!-- Generate WDRC — requires connected device; disabled if no device or already generating -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Content="Generate WDRC"
+                                Command="{Binding GenerateWdrcCommand}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Padding="16,8"
+                                IsEnabled="{Binding IsAudiogramEnabled}"/>
+                        <TextBlock Text="Requires connected hearing aid"
+                                   FontSize="11"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="10,0,0,0"
+                                   Visibility="{Binding ShowNoConnectionMessage, Converter={StaticResource BoolToVisibility}}"/>
+                        <TextBlock Text="Generates fitting parameters for selected memory"
+                                   FontSize="11"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="10,0,0,0"
+                                   Visibility="{Binding IsAudiogramEnabled, Converter={StaticResource BoolToVisibility}}"/>
+                    </StackPanel>
+
+                    <!-- Open Fitting -->
+                    <Button Grid.Column="4"
+                            Content="Open Fitting"
+                            Command="{Binding OpenFittingCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Padding="16,8"/>
+                </Grid>
+            </Border>
+
+            <!-- ═══ VALIDATION / STATUS MESSAGES ═══ -->
+            <StackPanel Margin="0,8,0,0">
+                <TextBlock Text="{Binding ValidationMessage}"
+                           Style="{StaticResource CaptionStyle}"
+                           Foreground="{StaticResource DangerBrush}"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding ValidationMessage, Converter={StaticResource StringToVisibilityConverter}}"/>
+                <TextBlock Text="{Binding StatusMessage}"
+                           Style="{StaticResource CaptionStyle}"
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           TextWrapping="Wrap"
+                           Margin="0,4,0,0"
+                           Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}"/>
             </StackPanel>
-        </Border>
-    </Grid>
+
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>
