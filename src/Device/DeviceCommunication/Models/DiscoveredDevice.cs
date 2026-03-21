@@ -29,5 +29,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication.Models
         public string? ChipId { get; set; }
         public string? HybridId { get; set; }
         public string? HybridSerial { get; set; }
+        /// <summary>True when device parameters are locked (from IDeviceInfo.ParameterLockState).</summary>
+        public bool ParameterLockState { get; set; }
     }
 }

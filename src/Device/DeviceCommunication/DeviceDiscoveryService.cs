@@ -111,6 +111,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     HybridSerial = sdkDeviceInfo.HybridSerial != 0 ? sdkDeviceInfo.HybridSerial.ToString() : null,
                     ProductId = sdkDeviceInfo.ProductId != 0 ? sdkDeviceInfo.ProductId.ToString() : null,
                     ChipId = sdkDeviceInfo.ChipId != 0 ? sdkDeviceInfo.ChipId.ToString() : null,
+                    ParameterLockState = sdkDeviceInfo.ParameterLockState,
                     IsDetected = true
                 };
             }

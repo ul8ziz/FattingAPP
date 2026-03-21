@@ -13,10 +13,18 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication.Models
         public string? LeftSerialId { get; set; }
         public string? LeftFirmwareId { get; set; }
         public string? LeftProductId { get; set; }
+        public string? LeftChipId { get; set; }
+        public string? LeftHybridId { get; set; }
+        public string? LeftHybridSerial { get; set; }
+        public bool LeftParameterLockState { get; set; }
 
         public string? RightSerialId { get; set; }
         public string? RightFirmwareId { get; set; }
         public string? RightProductId { get; set; }
+        public string? RightChipId { get; set; }
+        public string? RightHybridId { get; set; }
+        public string? RightHybridSerial { get; set; }
+        public bool RightParameterLockState { get; set; }
 
         /// <summary>Per-side errors: normalized error code + original message.</summary>
         public List<DiscoveryError> Errors { get; set; } = new List<DiscoveryError>();

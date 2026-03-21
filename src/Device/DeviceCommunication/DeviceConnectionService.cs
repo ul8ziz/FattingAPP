@@ -177,7 +177,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     HybridSerial = deviceInfo.HybridSerial != 0 ? deviceInfo.HybridSerial.ToString() : null,
                     ProductId = deviceInfo.ProductId != 0 ? deviceInfo.ProductId.ToString() : null,
                     ChipId = deviceInfo.ChipId != 0 ? deviceInfo.ChipId.ToString() : null,
-                    IsDetected = true
+                    IsDetected = true,
+                    ParameterLockState = deviceInfo.ParameterLockState
                 };
             }
             catch (OperationCanceledException)

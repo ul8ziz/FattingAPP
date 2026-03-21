@@ -129,6 +129,10 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 discoveryResult.LeftSerialId = leftResult.SerialId;
                 discoveryResult.LeftFirmwareId = leftResult.FirmwareId;
                 discoveryResult.LeftProductId = leftResult.ProductId;
+                discoveryResult.LeftChipId = leftResult.ChipId;
+                discoveryResult.LeftHybridId = leftResult.HybridId;
+                discoveryResult.LeftHybridSerial = leftResult.HybridSerial;
+                discoveryResult.LeftParameterLockState = leftResult.ParameterLockState;
             }
             else if (!string.IsNullOrEmpty(leftResult.ErrorCode) || !string.IsNullOrEmpty(leftResult.ErrorMessage))
                 discoveryResult.Errors.Add(new DiscoveryError { Side = "Left", ErrorCode = leftResult.ErrorCode ?? "", Message = leftResult.ErrorMessage ?? "" });
@@ -137,6 +141,10 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 discoveryResult.RightSerialId = rightResult.SerialId;
                 discoveryResult.RightFirmwareId = rightResult.FirmwareId;
                 discoveryResult.RightProductId = rightResult.ProductId;
+                discoveryResult.RightChipId = rightResult.ChipId;
+                discoveryResult.RightHybridId = rightResult.HybridId;
+                discoveryResult.RightHybridSerial = rightResult.HybridSerial;
+                discoveryResult.RightParameterLockState = rightResult.ParameterLockState;
             }
             else if (!string.IsNullOrEmpty(rightResult.ErrorCode) || !string.IsNullOrEmpty(rightResult.ErrorMessage))
                 discoveryResult.Errors.Add(new DiscoveryError { Side = "Right", ErrorCode = rightResult.ErrorCode ?? "", Message = rightResult.ErrorMessage ?? "" });
@@ -238,7 +246,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                         SerialId = sdkDeviceInfo.SerialId != 0 ? sdkDeviceInfo.SerialId.ToString() : null,
                         ChipId = sdkDeviceInfo.ChipId != 0 ? sdkDeviceInfo.ChipId.ToString() : null,
                         HybridId = sdkDeviceInfo.HybridId != 0 ? sdkDeviceInfo.HybridId.ToString() : null,
-                        HybridSerial = sdkDeviceInfo.HybridSerial != 0 ? sdkDeviceInfo.HybridSerial.ToString() : null
+                        HybridSerial = sdkDeviceInfo.HybridSerial != 0 ? sdkDeviceInfo.HybridSerial.ToString() : null,
+                        ParameterLockState = sdkDeviceInfo.ParameterLockState
                     };
                     LogResult(portLabel, start, success, sdkDeviceInfo);
                     return success;

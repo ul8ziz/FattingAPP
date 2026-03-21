@@ -813,6 +813,9 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                             var left = await _soundDesigner.ReloadFromNvmAsync(product, adaptor, DeviceSide.Left, _selectedMemoryIndex, progress, ct);
                             readSw.Stop();
                             var leftCount = left?.Categories.SelectMany(c => c.Sections.SelectMany(s => s.Items)).Count() ?? 0;
+                            var leftSerial = AppSessionState.Instance.LeftSerialId;
+                            System.Diagnostics.Debug.WriteLine($"[WriteVerify] RECONNECT LOAD: side=Left memoryIndex={_selectedMemoryIndex} memoryLabel=M{_selectedMemoryIndex + 1} serial={leftSerial ?? "?"} params={leftCount} ms={readSw.ElapsedMilliseconds}");
+                            ScanDiagnostics.WriteLine($"[WriteVerify] RECONNECT LOAD: side=Left memoryIndex={_selectedMemoryIndex} memoryLabel=M{_selectedMemoryIndex + 1} serial={leftSerial ?? "?"} params={leftCount} ms={readSw.ElapsedMilliseconds}");
                             System.Diagnostics.Debug.WriteLine($"[Perf] ReadSpace side=Left ms={readSw.ElapsedMilliseconds} params={leftCount}");
                             System.Diagnostics.Debug.WriteLine($"[Memory] Load side=Left memory={_selectedMemoryIndex + 1} source=device");
                             LeftSnapshot = left;
@@ -847,6 +850,9 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                             var right = await _soundDesigner.ReloadFromNvmAsync(product, adaptor, DeviceSide.Right, _selectedMemoryIndex, progress, ct);
                             readSw.Stop();
                             var rightCount = right?.Categories.SelectMany(c => c.Sections.SelectMany(s => s.Items)).Count() ?? 0;
+                            var rightSerial = AppSessionState.Instance.RightSerialId;
+                            System.Diagnostics.Debug.WriteLine($"[WriteVerify] RECONNECT LOAD: side=Right memoryIndex={_selectedMemoryIndex} memoryLabel=M{_selectedMemoryIndex + 1} serial={rightSerial ?? "?"} params={rightCount} ms={readSw.ElapsedMilliseconds}");
+                            ScanDiagnostics.WriteLine($"[WriteVerify] RECONNECT LOAD: side=Right memoryIndex={_selectedMemoryIndex} memoryLabel=M{_selectedMemoryIndex + 1} serial={rightSerial ?? "?"} params={rightCount} ms={readSw.ElapsedMilliseconds}");
                             System.Diagnostics.Debug.WriteLine($"[Perf] ReadSpace side=Right ms={readSw.ElapsedMilliseconds} params={rightCount}");
                             System.Diagnostics.Debug.WriteLine($"[Memory] Load side=Right memory={_selectedMemoryIndex + 1} source=device");
                             RightSnapshot = right;
@@ -1189,6 +1195,11 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             DeviceSettingsSnapshot snapshot,
             CancellationToken ct)
         {
+            var appState = AppSessionState.Instance;
+            var serialId = side == DeviceSide.Left ? appState.LeftSerialId : appState.RightSerialId;
+            System.Diagnostics.Debug.WriteLine($"[WriteVerify] SAVE START: side={side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} serial={serialId ?? "?"}");
+            ScanDiagnostics.WriteLine($"[WriteVerify] SAVE START: side={side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} serial={serialId ?? "?"}");
+
             try
             {
                 await DeviceInitializationService.EnsureInitializedAndConfiguredAsync(_session, side, ct);
@@ -1221,8 +1232,11 @@ namespace Ul8ziz.FittingApp.App.ViewModels
 
             _session.ClearMemoryDirty(side, memoryIndex);
             _settingsCache.InvalidateCacheForSide(side);
-            _nvmSaveStatus = "Persisted to NVM";
+            _nvmSaveStatus = "Persisted to NVM (verified)";
             OnPropertyChanged(nameof(FittingStatusText));
+
+            System.Diagnostics.Debug.WriteLine($"[WriteVerify] SAVE COMPLETE: side={side} memoryIndex={memoryIndex} serial={serialId ?? "?"} — write verified");
+            ScanDiagnostics.WriteLine($"[WriteVerify] SAVE COMPLETE: side={side} memoryIndex={memoryIndex} serial={serialId ?? "?"} — write verified");
 
             // Allow device time to flush to NVM before any follow-up read or disconnect.
             await Task.Delay(250, ct).ConfigureAwait(true);

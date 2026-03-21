@@ -69,7 +69,7 @@ The Fitting page appears after a successful connection to a hearing aid (Left an
 - **Live Mode ON:** UI changes update the in-memory snapshot. A debounce timer (400 ms) triggers a single `WriteSettingsAsync` after the last change, so the device is not flooded.
 - **Live Mode OFF:** Changes stay local until the user clicks **Save to Device**.
 - **Read (NVM-only):** On connect and memory load from device, the app uses **ReloadFromNvmAsync** (logs `[NVM] Restore M#`), which selects memory context then calls `ReadMemorySnapshotAsync` — semantics per SDK sample **presuite_memory_switch.py** (set CurrentMemory then ReadParameters loads NVM into RAM).
-- **Save (NVM-only):** **Save Current Memory** / **Save ALL Memories** call **BurnMemoryToNvmAsync** (logs `[NVM] Burn M#`) then **VerifyMemoryMatchesNvmAsync** (logs `[NVM] Verify M# OK/FAIL`). Only Burn to NVM counts as save; no separate "Write to RAM" is exposed. **Persistence after disconnect** requires the SDK to support an **NVM write** (e.g. `BeginWriteParameters(int memoryIndex)` or `ParameterSpace.kNvmMemoryN`). The app discovers this at runtime via reflection; if no NVM write API is found, it logs **"Not supported by docs: no NVM write API found; persistence may fail after disconnect."** and continues with RAM-only write—saved values may then not appear after reconnect. Status line shows **Persisted to NVM** after success.
+- **Save (NVM-only):** **Save Current Memory** / **Save ALL Memories** call **BurnMemoryToNvmAsync** (logs `[NVM] Burn M#`) then **VerifyMemoryMatchesNvmAsync** (logs `[NVM] Verify M# OK/FAIL`). Only Burn to NVM counts as save; no separate "Write to RAM" is exposed. **Persistence after disconnect** requires the SDK to support an **NVM write** (e.g. `BeginWriteParameters(int memoryIndex)` or `ParameterSpace.kNvmMemoryN`). The app discovers this at runtime via reflection; if no NVM write API is found, it logs **"Not supported by docs: no NVM write API found; persistence may fail after disconnect."** and continues with RAM-only write—saved values may then not appear after reconnect. **Write verification:** After each write, the app immediately reads back from the same memory and compares key parameters via **VerifySnapshotAfterReadBack**; verification pass/fail is logged with `[WriteVerify]` prefix. Status line shows **Persisted to NVM (verified)** after success.
 - **Reload from NVM:** Toolbar button reloads current memory from NVM (Restore + Read from RAM) for the selected memory.
 - **Partial failure:** If one side (e.g. Right) fails to load or write, the other (Left) still loads and displays; error message is shown for the failed side.
 
@@ -79,7 +79,7 @@ When the user chooses **Save to Device & End**, the flow that writes parameter (
 
 1. **SessionEndService** — When the user chooses Save to Device & End, it calls **RunSaveAllOnDispatcherAsync(session, onlyDirty: true)** on the UI thread. That uses **BurnMemoryToNvmAsync** and **VerifyMemoryMatchesNvmAsync** per (side, memory) — NVM-only; logs `[NVM] Burn M#`, `[NVM] Verify M# OK/FAIL`. After success, waits 500 ms before ClearSessionAsync.
 2. **RunSaveAllOnDispatcherAsync** — For each dirty memory per side: **session.GetSnapshotsForMemory(memoryIndex)** → **SoundDesignerService.BurnMemoryToNvmAsync(...)** → **VerifyMemoryMatchesNvmAsync(...)** → ClearMemoryDirty on success.
-3. **BurnMemoryToNvmAsync** — Logs `[NVM] Burn M#`, then calls **WriteMemorySnapshotAsync** (TrySelectMemoryContext, BuildWritableSnapshotForMemory, ApplySnapshotValuesToSdkParameters, WriteParameters for RAM, then **NVM write when SDK exposes it**—e.g. BeginWriteParameters(memoryIndex) or ParameterSpace.kNvmMemoryN—per vendor sample **presuite_memory_switch.py**; if no NVM write is found by reflection, logs "Not supported by docs" and only RAM is written), read-back, verify.
+3. **BurnMemoryToNvmAsync** — Logs `[NVM] Burn M#`, then calls **WriteMemorySnapshotAsync** (TrySelectMemoryContext, BuildWritableSnapshotForMemory, ApplySnapshotValuesToSdkParameters, WriteParameters for RAM, then **NVM write when SDK exposes it**—e.g. BeginWriteParameters(memoryIndex) or ParameterSpace.kNvmMemoryN—per vendor sample **presuite_memory_switch.py**; if no NVM write is found by reflection, logs "Not supported by docs" and only RAM is written), read-back, **VerifySnapshotAfterReadBack** (logs `[WriteVerify] VERIFICATION PASSED/FAILED`).
 4. **SoundDesignerSettingsEnumerator.ApplySnapshotValuesToSdkParameters** / **TrySetParameterValue** — Pushes each snapshot item’s value back into the SDK Parameter objects (`SdkParameterRef`) so WriteParameters sends the user’s edits; without this, the device would receive stale in-memory state.
 
 So “variable saving” = per (side, memory): GetSnapshotsForMemory → WriteMemorySnapshotAsync (TrySelectMemoryContext → BuildWritableSnapshotForMemory → ApplySnapshotValuesToSdkParameters → WriteParameters → verify) → ClearMemoryDirty on success. The save **result** (success/failure reason) is returned from the dispatcher delegate and used for the toast; do not rely on closure or TaskCompletionSource when changing this flow.
@@ -123,6 +123,15 @@ When the app uses **reflection** on the Sound Designer SDK (e.g. `PropertyInfo.G
 - **Toast:** When "Save to Device & End" fails, the banner shows the **SDK error** (e.g. "Save to device failed: E_UNCONFIGURED_DEVICE: The device must be configured... Session ended.").
 - **Log file:** All write failures are written to **log.txt** in the app directory with a single line: `[SoundDesigner] WriteToDevice failed: ...` and `[SessionEnd] SaveToDevice failed: ...`.
 - **Debug output:** The same message is written with `Debug.WriteLine` so it appears in the Visual Studio **Output** window when debugging.
+
+**Write verification diagnostics (`[WriteVerify]`):**
+
+- **BEFORE WRITE:** side, memoryIndex, memoryLabel, targetSpaces
+- **WRITE COMPLETE:** memoryIndex — starting read-back verification
+- **VERIFICATION PASSED/FAILED:** side, memoryIndex, reason (if failed)
+- **VERIFY NVM:** side, memoryIndex — reloading from device then comparing (after Burn)
+- **RECONNECT LOAD:** side, memoryIndex, serial, params count, ms (when LoadSettings re-reads after reconnect)
+- **SAVE START/COMPLETE:** side, memoryIndex, serial (FittingViewModel, SessionEndService)
 
 **To reduce duplicate TargetInvocationException lines (optional):**
 

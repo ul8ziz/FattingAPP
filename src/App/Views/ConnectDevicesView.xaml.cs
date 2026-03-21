@@ -456,6 +456,7 @@ namespace Ul8ziz.FittingApp.App.Views
                             Port = "D2XX",
                             SerialNumber = string.IsNullOrEmpty(dev.SerialNumber) ? dev.Description : dev.SerialNumber,
                             Firmware = "N/A",
+                            Description = dev.Description,
                             IsAvailable = true
                         });
                         scanResult.AllAttempts.Add(new ProgrammerScanner.ScanAttemptResult
@@ -509,6 +510,8 @@ namespace Ul8ziz.FittingApp.App.Views
                         SerialNumber = programmerInfo.SerialNumber ?? "N/A",
                         Firmware = programmerInfo.Firmware ?? "N/A",
                         Port = programmerInfo.Port ?? programmerInfo.DeviceId ?? "N/A",
+                        Description = programmerInfo.Description,
+                        Backend = programmerInfo.Type == ProgrammerType.Wired ? "D2XX" : "Wireless",
                         IsSelected = false
                     };
 
@@ -735,17 +738,31 @@ namespace Ul8ziz.FittingApp.App.Views
                     leftDeviceInfo = discoveryResult.FoundLeft ? new DeviceInfo
                     {
                         Side = DeviceSide.Left,
-                        Model = discoveryResult.LeftProductId ?? string.Empty,
+                        Model = !string.IsNullOrEmpty(discoveryResult.LeftProductId) && discoveryResult.LeftProductId != "0"
+                            ? discoveryResult.LeftProductId
+                            : discoveryResult.LeftFirmwareId ?? string.Empty,
                         SerialNumber = discoveryResult.LeftSerialId ?? "Unknown",
                         Firmware = discoveryResult.LeftFirmwareId ?? string.Empty,
+                        ProductId = discoveryResult.LeftProductId,
+                        ChipId = discoveryResult.LeftChipId,
+                        HybridId = discoveryResult.LeftHybridId,
+                        HybridSerial = discoveryResult.LeftHybridSerial,
+                        ParameterLockState = discoveryResult.LeftParameterLockState,
                         IsDetected = true
                     } : null;
                     rightDeviceInfo = discoveryResult.FoundRight ? new DeviceInfo
                     {
                         Side = DeviceSide.Right,
-                        Model = discoveryResult.RightProductId ?? string.Empty,
+                        Model = !string.IsNullOrEmpty(discoveryResult.RightProductId) && discoveryResult.RightProductId != "0"
+                            ? discoveryResult.RightProductId
+                            : discoveryResult.RightFirmwareId ?? string.Empty,
                         SerialNumber = discoveryResult.RightSerialId ?? "Unknown",
                         Firmware = discoveryResult.RightFirmwareId ?? string.Empty,
+                        ProductId = discoveryResult.RightProductId,
+                        ChipId = discoveryResult.RightChipId,
+                        HybridId = discoveryResult.RightHybridId,
+                        HybridSerial = discoveryResult.RightHybridSerial,
+                        ParameterLockState = discoveryResult.RightParameterLockState,
                         IsDetected = true
                     } : null;
                     foreach (var err in discoveryResult.Errors)
@@ -784,10 +801,15 @@ namespace Ul8ziz.FittingApp.App.Views
                     var leftVm = new HearingAidViewModel
                     {
                         Side = "Left",
-                        Model = leftDeviceInfo.Model,
+                        Model = !string.IsNullOrEmpty(leftDeviceInfo.Model) ? leftDeviceInfo.Model : leftDeviceInfo.Firmware,
                         SerialNumber = leftDeviceInfo.SerialNumber,
                         Firmware = leftDeviceInfo.Firmware,
+                        ProductId = leftDeviceInfo.ProductId,
+                        ChipId = leftDeviceInfo.ChipId,
                         BatteryLevel = leftDeviceInfo.BatteryLevel ?? 0,
+                        HasBatterySupport = leftDeviceInfo.BatteryLevel.HasValue && leftDeviceInfo.BatteryLevel.Value > 0,
+                        ParameterLockState = leftDeviceInfo.ParameterLockState,
+                        Status = "Detected",
                         IsSelected = true
                     };
                     leftVm.PropertyChanged += (s, args) =>
@@ -809,10 +831,15 @@ namespace Ul8ziz.FittingApp.App.Views
                     var rightVm = new HearingAidViewModel
                     {
                         Side = "Right",
-                        Model = rightDeviceInfo.Model,
+                        Model = !string.IsNullOrEmpty(rightDeviceInfo.Model) ? rightDeviceInfo.Model : rightDeviceInfo.Firmware,
                         SerialNumber = rightDeviceInfo.SerialNumber,
                         Firmware = rightDeviceInfo.Firmware,
+                        ProductId = rightDeviceInfo.ProductId,
+                        ChipId = rightDeviceInfo.ChipId,
                         BatteryLevel = rightDeviceInfo.BatteryLevel ?? 0,
+                        HasBatterySupport = rightDeviceInfo.BatteryLevel.HasValue && rightDeviceInfo.BatteryLevel.Value > 0,
+                        ParameterLockState = rightDeviceInfo.ParameterLockState,
+                        Status = "Detected",
                         IsSelected = true
                     };
                     rightVm.PropertyChanged += (s, args) =>
@@ -1000,9 +1027,13 @@ namespace Ul8ziz.FittingApp.App.Views
                             System.Diagnostics.Debug.WriteLine($"[ConnectDevices] INFO: {side} Serial={deviceInfo.SerialNumber} — unprogrammed device (normal for dev/test units).");
                         }
 
-                        device.Model = deviceInfo.Model;
+                        device.Model = !string.IsNullOrEmpty(deviceInfo.Model) ? deviceInfo.Model : deviceInfo.Firmware;
                         device.SerialNumber = deviceInfo.SerialNumber;
                         device.Firmware = deviceInfo.Firmware;
+                        device.ProductId = deviceInfo.ProductId;
+                        device.ChipId = deviceInfo.ChipId;
+                        device.ParameterLockState = deviceInfo.ParameterLockState;
+                        device.Status = "Connected";
                         if (side == DeviceSide.Left) result.LeftConnected = true;
                         else result.RightConnected = true;
                     }
@@ -1163,6 +1194,7 @@ namespace Ul8ziz.FittingApp.App.Views
             return string.IsNullOrEmpty(side) ? name : $"{name} ({side})";
         }
 
+        /// <summary>Loads device identity and attempts to read battery voltage from Product.BatteryAverageVoltage (sounddesigner_programmers_guide.pdf §7 Live Display).</summary>
         private async System.Threading.Tasks.Task LoadDeviceInfoAsync()
         {
             try
@@ -1173,12 +1205,51 @@ namespace Ul8ziz.FittingApp.App.Views
                     System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Left: Model={session.LeftModelName} Firmware={session.LeftFirmwareId} Serial={session.LeftSerialId}");
                 if (session.ConnectedRight)
                     System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Right: Model={session.RightModelName} Firmware={session.RightFirmwareId} Serial={session.RightSerialId}");
-                await System.Threading.Tasks.Task.CompletedTask;
+
+                // Try to read battery voltage from Product.BatteryAverageVoltage (documented API)
+                var product = _sdkManager?.GetProduct();
+                if (product != null)
+                {
+                    try
+                    {
+                        var voltage = TryReadBatteryAverageVoltage(product);
+                        if (voltage.HasValue)
+                        {
+                            await Application.Current.Dispatcher.InvokeAsync(() =>
+                            {
+                                if (LeftDevice != null) { LeftDevice.BatteryVoltageV = voltage; OnPropertyChanged(nameof(LeftDevice)); }
+                                if (RightDevice != null) { RightDevice.BatteryVoltageV = voltage; OnPropertyChanged(nameof(RightDevice)); }
+                            });
+                            System.Diagnostics.Debug.WriteLine($"[ConnectDevices] BatteryAverageVoltage: {voltage:F3} V");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Battery read: {ex.Message}");
+                    }
+                }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[ConnectDevices] LoadDeviceInfoAsync error: {ex.Message}");
             }
+        }
+
+        /// <summary>Tries to read Product.BatteryAverageVoltage via reflection. Returns null if not supported.</summary>
+        private static double? TryReadBatteryAverageVoltage(SDLib.IProduct product)
+        {
+            if (product == null) return null;
+            try
+            {
+                var prop = product.GetType().GetProperty("BatteryAverageVoltage", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                if (prop == null || !prop.CanRead) return null;
+                var val = prop.GetValue(product);
+                if (val is double d && d >= 0) return d;
+                if (val is float f && f >= 0) return f;
+                if (val is int i && i >= 0) return i / 1000.0; // assume mV
+                return null;
+            }
+            catch { return null; }
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -1295,6 +1366,10 @@ namespace Ul8ziz.FittingApp.App.Views
         public string SerialNumber { get; set; } = string.Empty;
         public string Firmware { get; set; } = string.Empty;
         public string Port { get; set; } = string.Empty;
+        /// <summary>Optional description from hardware (e.g. D2XX device description).</summary>
+        public string? Description { get; set; }
+        /// <summary>Communication backend: D2XX for wired, Wireless for wireless.</summary>
+        public string Backend { get; set; } = string.Empty;
         
         // Store ProgrammerInfo for SDK operations
         public Ul8ziz.FittingApp.Device.DeviceCommunication.Models.ProgrammerInfo? ProgrammerInfo { get; set; }
@@ -1316,12 +1391,23 @@ namespace Ul8ziz.FittingApp.App.Views
     public class HearingAidViewModel : INotifyPropertyChanged
     {
         private bool _isSelected;
+        private double? _batteryVoltageV;
 
         public string Side { get; set; } = string.Empty;
         public string Model { get; set; } = string.Empty;
         public string SerialNumber { get; set; } = string.Empty;
         public string Firmware { get; set; } = string.Empty;
+        public string? ProductId { get; set; }
+        public string? ChipId { get; set; }
         public int BatteryLevel { get; set; }
+        /// <summary>True when battery level (percentage) is available from SDK/device. When false, battery percentage UI is hidden.</summary>
+        public bool HasBatterySupport { get; set; }
+        /// <summary>Battery voltage in volts (from Product.BatteryAverageVoltage when available). Null when not readable.</summary>
+        public double? BatteryVoltageV { get => _batteryVoltageV; set { _batteryVoltageV = value; OnPropertyChanged(); } }
+        /// <summary>True when device parameters are locked.</summary>
+        public bool ParameterLockState { get; set; }
+        /// <summary>Connection status: Detected, Connected, etc.</summary>
+        public string Status { get; set; } = "Detected";
 
         public bool IsSelected
         {

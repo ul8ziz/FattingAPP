@@ -110,6 +110,9 @@ namespace Ul8ziz.FittingApp.App.Services
                     var (leftSnap, _) = session.GetSnapshotsForMemory(memoryIndex);
                     if (leftSnap != null)
                     {
+                        var leftSerial = AppSessionState.Instance.LeftSerialId;
+                        System.Diagnostics.Debug.WriteLine($"[WriteVerify] SESSION END SAVE: side=Left memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} serial={leftSerial ?? "?"}");
+                        ScanDiagnostics.WriteLine($"[WriteVerify] SESSION END SAVE: side=Left memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} serial={leftSerial ?? "?"}");
                         System.Diagnostics.Debug.WriteLine($"SessionEnd: SaveToDevice (Left) memory={memoryIndex + 1}");
                         var adaptor = conn.GetConnection(DeviceSide.Left);
                         if (adaptor != null)
@@ -131,6 +134,9 @@ namespace Ul8ziz.FittingApp.App.Services
                     var (_, rightSnap) = session.GetSnapshotsForMemory(memoryIndex);
                     if (rightSnap != null)
                     {
+                        var rightSerial = AppSessionState.Instance.RightSerialId;
+                        System.Diagnostics.Debug.WriteLine($"[WriteVerify] SESSION END SAVE: side=Right memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} serial={rightSerial ?? "?"}");
+                        ScanDiagnostics.WriteLine($"[WriteVerify] SESSION END SAVE: side=Right memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} serial={rightSerial ?? "?"}");
                         System.Diagnostics.Debug.WriteLine($"SessionEnd: SaveToDevice (Right) memory={memoryIndex + 1}");
                         var adaptor = conn.GetConnection(DeviceSide.Right);
                         if (adaptor != null)

@@ -297,6 +297,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             progress?.Report($"Reading Memory {memoryIndex + 1} parameters…");
 
             TrySelectMemoryContext(product, memoryIndex);
+            Debug.WriteLine($"[WriteVerify] READ START: side={side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} — reading from device");
+            ScanDiagnostics.WriteLine($"[WriteVerify] READ START: side={side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} — reading from device");
 
             var spacesToRead = new List<ParameterSpace>
             {
@@ -337,6 +339,9 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             progress?.Report($"Building snapshot for Memory {memoryIndex + 1}…");
 
             var snapshot = SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, memoryIndex, side);
+            var itemCount = snapshot?.Categories.SelectMany(c => c.Sections.SelectMany(s => s.Items)).Count() ?? 0;
+            Debug.WriteLine($"[WriteVerify] READ COMPLETE: side={side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} params={itemCount} totalMs={totalTime}");
+            ScanDiagnostics.WriteLine($"[WriteVerify] READ COMPLETE: side={side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} params={itemCount} totalMs={totalTime}");
             progress?.Report("Done.");
             return snapshot;
         }
@@ -400,6 +405,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             };
             var spacesLog = string.Join(", ", spacesToWrite);
             var memoryLog = (memoryIndex + 1).ToString();
+            Debug.WriteLine($"[WriteVerify] BEFORE WRITE: side={snapshot.Side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} targetSpaces=[{spacesLog}]");
+            ScanDiagnostics.WriteLine($"[WriteVerify] BEFORE WRITE: side={snapshot.Side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} targetSpaces=[{spacesLog}]");
             Debug.WriteLine($"[SoundDesigner] Save started: memory={memoryLog}, spaces=[{spacesLog}]");
             ScanDiagnostics.WriteLine($"[SoundDesigner] Save started: memory={memoryLog}, spaces=[{spacesLog}]");
 
@@ -504,7 +511,10 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
 
                 progress?.Report("Verifying…");
 
-                // Read back for verification
+                Debug.WriteLine($"[WriteVerify] WRITE COMPLETE: memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} — starting read-back verification");
+                ScanDiagnostics.WriteLine($"[WriteVerify] WRITE COMPLETE: memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} — starting read-back verification");
+
+                // Read back for verification (same memory, same spaces)
                 foreach (var space in spacesToWrite)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -517,10 +527,12 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     monitor.GetResult();
                 }
 
-                // Optional verification: compare a subset of parameters with current product state
+                // Verification: compare written snapshot with device read-back (same memory)
                 var (verified, verifyFailure) = SoundDesignerSettingsEnumerator.VerifySnapshotAfterReadBack(writeSnapshot, maxItemsToCheck: 50);
                 if (!verified && !string.IsNullOrEmpty(verifyFailure))
                 {
+                    Debug.WriteLine($"[WriteVerify] VERIFICATION FAILED: side={snapshot.Side} memoryIndex={memoryIndex} reason={verifyFailure}");
+                    ScanDiagnostics.WriteLine($"[WriteVerify] VERIFICATION FAILED: side={snapshot.Side} memoryIndex={memoryIndex} reason={verifyFailure}");
                     Debug.WriteLine($"[SoundDesigner] Save verification failed: {verifyFailure}");
                     ScanDiagnostics.WriteLine($"[SoundDesigner] Save verification failed: {verifyFailure}");
                     onWriteFailed?.Invoke(verifyFailure);
@@ -528,6 +540,8 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     return false;
                 }
 
+                Debug.WriteLine($"[WriteVerify] VERIFICATION PASSED: side={snapshot.Side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} — device write confirmed");
+                ScanDiagnostics.WriteLine($"[WriteVerify] VERIFICATION PASSED: side={snapshot.Side} memoryIndex={memoryIndex} memoryLabel=M{memoryIndex + 1} — device write confirmed");
                 progress?.Report("Saved.");
                 ScanDiagnostics.WriteLine("[SoundDesigner] Save completed: result=success");
                 return true;
@@ -583,15 +597,21 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             ValidateMemoryIndex(memoryIndex);
             try
             {
+                Debug.WriteLine($"[WriteVerify] VERIFY NVM: side={snapshot.Side} memoryIndex={memoryIndex} — reloading from device then comparing");
+                ScanDiagnostics.WriteLine($"[WriteVerify] VERIFY NVM: side={snapshot.Side} memoryIndex={memoryIndex} — reloading from device then comparing");
                 var afterReload = await ReloadFromNvmAsync(product, adaptor, snapshot.Side, memoryIndex, null, ct);
                 var (verified, failureMessage) = SoundDesignerSettingsEnumerator.VerifySnapshotAfterReadBack(snapshot, afterReload, maxItemsToCheck);
                 if (verified)
                 {
+                    Debug.WriteLine($"[WriteVerify] VERIFY NVM PASSED: side={snapshot.Side} memoryIndex={memoryIndex} — values match after reconnect read");
+                    ScanDiagnostics.WriteLine($"[WriteVerify] VERIFY NVM PASSED: side={snapshot.Side} memoryIndex={memoryIndex} — values match after reconnect read");
                     Debug.WriteLine($"[NVM] Verify M{memoryIndex + 1} OK");
                     ScanDiagnostics.WriteLine($"[NVM] Verify M{memoryIndex + 1} OK");
                 }
                 else
                 {
+                    Debug.WriteLine($"[WriteVerify] VERIFY NVM FAILED: side={snapshot.Side} memoryIndex={memoryIndex} reason={failureMessage}");
+                    ScanDiagnostics.WriteLine($"[WriteVerify] VERIFY NVM FAILED: side={snapshot.Side} memoryIndex={memoryIndex} reason={failureMessage}");
                     Debug.WriteLine($"[NVM] Verify M{memoryIndex + 1} FAIL: {failureMessage}");
                     ScanDiagnostics.WriteLine($"[NVM] Verify M{memoryIndex + 1} FAIL: {failureMessage}");
                 }

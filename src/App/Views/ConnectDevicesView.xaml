@@ -221,7 +221,11 @@
                                             </TextBlock>
                                             <TextBlock Text="{Binding Firmware, StringFormat='Firmware: {0}'}"
                                                        Style="{StaticResource CaptionStyle}" Margin="0,0,0,0"/>
-                                            <TextBlock Text="{Binding Port}" Style="{StaticResource CaptionStyle}"/>
+                                            <TextBlock Text="{Binding Backend, StringFormat='Backend: {0}'}"
+                                                       Style="{StaticResource CaptionStyle}"/>
+                                            <TextBlock Text="{Binding Description}" Style="{StaticResource CaptionStyle}"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="200"
+                                                       Visibility="{Binding Description, Converter={StaticResource StringToVisibilityConverter}}"/>
                                         </StackPanel>
                                         <Ellipse Grid.Column="2" Width="20" Height="20"
                                                  Stroke="{StaticResource Gray300Brush}"
@@ -244,7 +248,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <StackPanel HorizontalAlignment="Center" Margin="0,24,0,24">
+                    <StackPanel HorizontalAlignment="Center" Margin="0,24,0,0">
                         <StackPanel.Style>
                             <Style TargetType="StackPanel">
                                 <Setter Property="Visibility" Value="Collapsed"/>
@@ -258,11 +262,6 @@
                         <TextBlock Text="No programmers scanned. Click Scan Wired or Scan Wireless."
                                    Style="{StaticResource CaptionStyle}" TextAlignment="Center" TextWrapping="Wrap"/>
                     </StackPanel>
-                    <Expander Header="Advanced" IsExpanded="False" Margin="0,12,0,0">
-                        <Border Padding="12,8" Background="{StaticResource Gray50Brush}" CornerRadius="4" Margin="0,4,0,0">
-                            <TextBlock Text="Additional programmer options (placeholder)." Style="{StaticResource CaptionStyle}"/>
-                        </Border>
-                    </Expander>
                     </StackPanel>
                 </Border>
 
@@ -338,12 +337,35 @@
                                                   Margin="0,0,0,8"
                                                   Checked="DeviceCheckBox_Checked" Unchecked="DeviceCheckBox_Checked">
                                             <CheckBox.Content>
-                                                <TextBlock Text="{Binding Side}" VerticalAlignment="Center"/>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Side}" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding Model, StringFormat=' — {0}'}" Style="{StaticResource CaptionStyle}"
+                                                               VerticalAlignment="Center" Margin="4,0,0,0"
+                                                               Visibility="{Binding Model, Converter={StaticResource StringToVisibilityConverter}}"/>
+                                                </StackPanel>
                                             </CheckBox.Content>
                                         </CheckBox>
-                                        <TextBlock Text="{Binding SerialNumber, StringFormat='Serial {0}'}" Style="{StaticResource CaptionStyle}" Margin="0,0,0,2"/>
-                                        <TextBlock Text="{Binding Firmware, StringFormat='Firmware: {0}'}" Style="{StaticResource CaptionStyle}" Margin="0,0,0,8"/>
-                                        <Grid Margin="0,0,0,8">
+                                        <TextBlock Text="{Binding SerialNumber, StringFormat='Serial: {0}'}" Style="{StaticResource CaptionStyle}" Margin="0,0,0,2"/>
+                                        <TextBlock Text="{Binding Firmware, StringFormat='Firmware: {0}'}" Style="{StaticResource CaptionStyle}" Margin="0,0,0,2"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                                            <TextBlock Text="{Binding ProductId, StringFormat='Product ID: {0}'}" Style="{StaticResource CaptionStyle}"
+                                                       Visibility="{Binding ProductId, Converter={StaticResource StringToVisibilityConverter}}"/>
+                                            <TextBlock Text="{Binding ChipId, StringFormat='Chip ID: {0}'}" Style="{StaticResource CaptionStyle}"
+                                                       Margin="12,0,0,0"
+                                                       Visibility="{Binding ChipId, Converter={StaticResource StringToVisibilityConverter}}"/>
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding Status, StringFormat='Status: {0}'}" Style="{StaticResource CaptionStyle}" Margin="0,0,0,2"
+                                                   Visibility="{Binding Status, Converter={StaticResource StringToVisibilityConverter}}"/>
+                                        <TextBlock Style="{StaticResource CaptionStyle}" Foreground="{StaticResource TextSecondaryBrush}"
+                                                   Margin="0,0,0,2"
+                                                   Visibility="{Binding ParameterLockState, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock.Text>Device reports parameter lock (write may still succeed)</TextBlock.Text>
+                                            <TextBlock.ToolTip>IDeviceInfo.ParameterLockState at connect. Some devices allow write despite this. Save to device will attempt write and verify.</TextBlock.ToolTip>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding BatteryVoltageV, StringFormat='Battery: {0:F2} V'}" Style="{StaticResource CaptionStyle}" Margin="0,0,0,8"
+                                                   Visibility="{Binding BatteryVoltageV, Converter={StaticResource ObjectNullToVisibilityConverter}}"/>
+                                        <Grid Margin="0,0,0,8"
+                                              Visibility="{Binding HasBatterySupport, Converter={StaticResource BooleanToVisibilityConverter}}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
