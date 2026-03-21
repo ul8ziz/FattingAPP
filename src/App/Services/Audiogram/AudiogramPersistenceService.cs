@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Ul8ziz.FittingApp.App.Models.Audiogram;
 
@@ -10,10 +11,14 @@ namespace Ul8ziz.FittingApp.App.Services.Audiogram
     /// <summary>JSON file persistence for audiogram sessions.</summary>
     public sealed class AudiogramPersistenceService : IAudiogramPersistenceService
     {
+        // JsonStringEnumConverter: enums serialized as their string name ("AC", "Left", etc.)
+        // instead of integers. This makes persisted JSON human-readable and robust against
+        // enum value reordering. Also accepts integer values during read (backward compat).
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             WriteIndented = true,
-            PropertyNameCaseInsensitive = true
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() }
         };
 
         public async Task SaveAsync(AudiogramSession session, string filePath)

@@ -492,6 +492,35 @@ To build a **runnable, self-contained** version that you can copy to another PC 
 
 ## Recent Changes
 
+### Audiogram Persistence — Full App-Restart Fix (2026-03-09)
+
+End-to-end fix for Audiogram clinical data not appearing after full app restart + reconnect.
+
+**Root causes fixed:**
+
+1. **`async void` fire-and-forget race** — `AutoSaveToAppDataAsync()` was `async void`; if the app closed before the task completed, the JSON file was never written. Replaced with `private Task SaveToAppDataAsync()` (awaitable). `SaveAudiogram()` and `LoadAudiogram()` now `await` it; `AutoSaveToAppDataAsync()` is a thin `async void` wrapper for non-awaited callsites (e.g. memory switch).
+
+2. **Memory switch did not trigger disk persistence** — `SaveCurrentMemoryAudiogram()` updated only the in-memory `_audioSessionsByMemory` dict; it did not write to disk. Now calls `AutoSaveToAppDataAsync()` after updating the dict so every memory switch also persists to `%AppData%`.
+
+3. **Session end did not flush audiogram** — `SessionEndService` had no awareness of `AudiogramViewModel`. Added `public Task FlushAsync()` to `AudiogramViewModel`, a `Func<Task>? FlushAudiogramAsync` property to `MainViewModel`, wired in `MainView` constructor. `EndSession()` (now `async void`) awaits `FlushAudiogramAsync()` before SDK teardown begins.
+
+4. **Silent JSON deserialization failure** — `AudiogramPointType` and `DeviceSide` enums serialized as integers by default. Any ordinal mismatch caused a silent exception (swallowed by the catch block in `LoadFromAppData`), leaving `_audioSessionsByMemory` empty. Both `AudiogramPersistenceService.JsonOptions` and `AudiogramViewModel._jsonOpts` now use `JsonStringEnumConverter` (enums serialize as `"AC"`, `"Left"`, etc.). Backward compatible: `allowIntegerValues=true` (default) so old integer-serialized files still deserialize.
+
+5. **`LoadFromAppData` swallowed all exceptions silently** — Added explicit path/exists logging before the try block and full exception type + message in the catch, so failures are visible in Debug Output.
+
+**New behavior:**
+- Disk write happens on every memory switch, every explicit "Save Audiogram", every file load, every session end
+- App restart → navigate to Audiogram (device already connected) → `LoadFromAppData` restores `_audioSessionsByMemory` from `%AppData%\Ul8ziz\FittingApp\audiogram_sessions.json` → `LoadAudiogramForMemory` populates chart immediately
+- Debug Output shows `[Audiogram] LoadFromAppData: path='...' exists=True/False` for diagnosis
+- Debug Output shows `[Audiogram] FlushAsync invoked: ActiveMemory=... HasAnyData=...` before every session end
+
+**Files changed:**
+- `src/App/Services/Audiogram/AudiogramPersistenceService.cs` — `JsonStringEnumConverter` in `JsonOptions`
+- `src/App/ViewModels/AudiogramViewModel.cs` — `SaveToAppDataAsync` (Task), `AutoSaveToAppDataAsync` (wrapper), `FlushAsync` (public), improved `LoadFromAppData`, auto-save on memory switch, awaited disk writes
+- `src/App/Views/MainView.xaml.cs` — `FlushAudiogramAsync` on `MainViewModel`, wired in `MainView`, `async void EndSession` with flush-before-disconnect
+
+---
+
 ### Audiogram Screen Redesign (2026-03-09)
 
 Complete replacement of the Audiogram screen with a clinical-style UI matching the agreed design:

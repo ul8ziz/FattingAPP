@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -68,6 +69,14 @@ namespace Ul8ziz.FittingApp.App.Views
                 _viewModel.CurrentNavKey = "ConnectDevices";
                 _viewModel.CurrentView = connectView;
                 connectView.StartWiredDiscoveryAfterDebounce();
+            };
+            // Wire audiogram flush: called before session end to guarantee disk persistence.
+            // The lambda captures _cachedAudiogramView by reference — if the user never
+            // navigated to Audiogram, _cachedAudiogramView is null and the flush is a no-op.
+            _viewModel.FlushAudiogramAsync = async () =>
+            {
+                if (_cachedAudiogramView?.DataContext is ViewModels.AudiogramViewModel vm)
+                    await vm.FlushAsync();
             };
             _viewModel.ShowToast = msg =>
             {
@@ -194,6 +203,13 @@ namespace Ul8ziz.FittingApp.App.Views
         public Action? ShowWaitingDialog { get; set; }
         public Action? HideWaitingDialog { get; set; }
 
+        /// <summary>
+        /// Injected by MainView. Flushes AudiogramViewModel clinical data to disk before
+        /// the device session ends. Awaited in EndSession so the write is guaranteed to
+        /// complete before SDK teardown begins.
+        /// </summary>
+        public Func<Task>? FlushAudiogramAsync { get; set; }
+
         public string ConnectionStatusText => AppSessionState.Instance.ConnectionStatusText;
         public SolidColorBrush? ConnectionStatusBrush => AppSessionState.Instance.ConnectionStatusBrush as SolidColorBrush;
         public string ConnectedDeviceDisplayName => AppSessionState.Instance.ConnectedDeviceDisplayName;
@@ -233,11 +249,21 @@ namespace Ul8ziz.FittingApp.App.Views
             }
         }
 
-        private void EndSession()
+        private async void EndSession()
         {
             var result = ShowEndSessionDialog?.Invoke() ?? EndSessionDialogResult.Cancel;
             if (result == EndSessionDialogResult.Cancel)
                 return;
+
+            // Flush audiogram clinical data to disk BEFORE device disconnects.
+            // FlushAsync is safe — it catches all exceptions internally and is a no-op
+            // when no audiogram data exists. This guarantees persistence across restarts.
+            if (FlushAudiogramAsync != null)
+            {
+                try   { await FlushAudiogramAsync(); }
+                catch { /* FlushAsync itself does not throw; belt-and-suspenders guard */ }
+            }
+
             var dispatcher = Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher;
             _ = SessionEndService.ExecuteEndSessionAsync(result, ShowToast ?? (_ => { }), NavigateToConnectAndRestartDiscovery ?? (() => { }), dispatcher, ShowWaitingDialog, HideWaitingDialog);
         }

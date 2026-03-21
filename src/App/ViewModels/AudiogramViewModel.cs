@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Microsoft.Win32;
@@ -81,8 +82,18 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             { "Memory 1", "Memory 2", "Memory 3", "Memory 4",
               "Memory 5", "Memory 6", "Memory 7", "Memory 8" };
 
-        private static readonly JsonSerializerOptions _jsonOpts =
-            new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
+        // Must match AudiogramPersistenceService.JsonOptions exactly.
+        // JsonStringEnumConverter is critical: enums (AudiogramPointType, DeviceSide) serialize
+        // as readable strings ("AC", "Left") rather than integers, preventing silent
+        // deserialization failure if enum ordinal values ever change.
+        // allowIntegerValues:true (default) ensures old files with integer enum values
+        // still deserialize correctly (backward compatible).
+        private static readonly JsonSerializerOptions _jsonOpts = new()
+        {
+            WriteIndented = true,
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() }
+        };
 
         /// <summary>Fixed app-data path that persists audiogram data across app restarts.</summary>
         private static string GetAppDataAudiogramPath() =>
@@ -463,35 +474,61 @@ namespace Ul8ziz.FittingApp.App.ViewModels
 
         /// <summary>
         /// Synchronously reads the per-memory audiogram store from app-data on startup.
-        /// The file is small (< 50 KB) so synchronous I/O is acceptable here.
+        /// The file is small (&lt; 50 KB) so synchronous I/O is acceptable here.
+        /// Logs the exact path and file state for diagnostics — check Debug Output if data is missing.
         /// </summary>
         private void LoadFromAppData()
         {
+            var path = GetAppDataAudiogramPath();
+            Debug.WriteLine($"[Audiogram] LoadFromAppData: path='{path}' exists={File.Exists(path)}");
+
             try
             {
-                var path = GetAppDataAudiogramPath();
-                if (!File.Exists(path)) return;
+                if (!File.Exists(path))
+                {
+                    Debug.WriteLine("[Audiogram] LoadFromAppData: no persisted file — clean state.");
+                    return;
+                }
 
                 using var fs = File.OpenRead(path);
                 var dict = JsonSerializer.Deserialize<Dictionary<int, AudiogramSession>>(fs, _jsonOpts);
-                if (dict == null) return;
+
+                if (dict == null || dict.Count == 0)
+                {
+                    Debug.WriteLine("[Audiogram] LoadFromAppData: file deserialized to null/empty dict.");
+                    return;
+                }
 
                 foreach (var kv in dict)
                     _audioSessionsByMemory[kv.Key] = kv.Value;
 
-                Debug.WriteLine($"[Audiogram] Startup: restored {dict.Count} session(s) from app-data.");
+                Debug.WriteLine(
+                    $"[Audiogram] LoadFromAppData: restored {dict.Count} session(s). " +
+                    $"Keys=[{string.Join(",", dict.Keys)}] " +
+                    $"Source=disk");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[Audiogram] LoadFromAppData failed (non-fatal): {ex.Message}");
+                // Log full type + message so the root cause is visible in Debug Output.
+                Debug.WriteLine(
+                    $"[Audiogram] LoadFromAppData FAILED ({ex.GetType().Name}): {ex.Message} " +
+                    $"path='{path}'");
             }
         }
 
         /// <summary>
-        /// Fire-and-forget: writes all non-empty per-memory sessions to app-data so they
-        /// survive app restarts. Called after every explicit "Save Audiogram" or file load.
+        /// Fire-and-forget wrapper — safe to call without awaiting from synchronous callers
+        /// (e.g. memory switch auto-save). All exceptions are caught internally.
+        /// Use <see cref="SaveToAppDataAsync"/> when you need to await completion.
         /// </summary>
-        private async void AutoSaveToAppDataAsync()
+        private async void AutoSaveToAppDataAsync() => await SaveToAppDataAsync();
+
+        /// <summary>
+        /// Writes all non-empty per-memory sessions to the fixed app-data path so they survive
+        /// app restarts. Returns a <see cref="Task"/> so callers can await guaranteed completion.
+        /// Logs the exact file path and session count written.
+        /// </summary>
+        private async Task SaveToAppDataAsync()
         {
             try
             {
@@ -500,28 +537,66 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                               || (kv.Value.LeftEarAudiogram?.Points.Count  ?? 0) > 0)
                     .ToDictionary(kv => kv.Key, kv => kv.Value);
 
-                await _persistenceService.SaveSessionsAsync(snapshot, GetAppDataAudiogramPath())
-                    .ConfigureAwait(false);
+                var path = GetAppDataAudiogramPath();
+                await _persistenceService.SaveSessionsAsync(snapshot, path).ConfigureAwait(false);
 
-                Debug.WriteLine($"[Audiogram] AutoSave: wrote {snapshot.Count} session(s) to app-data.");
+                Debug.WriteLine(
+                    $"[Audiogram] SaveToAppData: wrote {snapshot.Count} session(s) to '{path}'. " +
+                    $"Keys=[{string.Join(",", snapshot.Keys)}] Source=explicit-flush");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[Audiogram] AutoSaveToAppData failed (non-fatal): {ex.Message}");
+                Debug.WriteLine(
+                    $"[Audiogram] SaveToAppData FAILED ({ex.GetType().Name}): {ex.Message}");
             }
         }
 
         // ── Per-memory audiogram save / load ───────────────────────────────────
 
         /// <summary>
-        /// Saves the current UI state into _audioSessionsByMemory[_selectedMemoryIndex].
-        /// Called automatically before any memory switch.
+        /// Flush current UI audiogram state to disk.
+        /// Called by session end and app shutdown to guarantee persistence before device
+        /// is disconnected or process exits.
+        ///
+        /// Safe to call even when no audiogram data has been entered — no-op in that case.
+        /// </summary>
+        public async Task FlushAsync()
+        {
+            // Capture current UI state into the in-memory dict for the active memory
+            SaveCurrentMemoryAudiogram();
+
+            int memIdx = _selectedMemoryIndex;
+            bool hasData = _audioSessionsByMemory.Any(
+                kv => (kv.Value.RightEarAudiogram?.Points.Count ?? 0) > 0
+                   || (kv.Value.LeftEarAudiogram?.Points.Count  ?? 0) > 0);
+
+            Debug.WriteLine(
+                $"[Audiogram] FlushAsync invoked: ActiveMemory='{MemoryNames[memIdx]}' " +
+                $"Index={memIdx} HasAnyData={hasData} " +
+                $"ConnectedLeft={_appSession.ConnectedLeft} ConnectedRight={_appSession.ConnectedRight}");
+
+            if (!hasData) return;
+
+            await SaveToAppDataAsync();
+        }
+
+        /// <summary>
+        /// Saves the current UI state into _audioSessionsByMemory[_selectedMemoryIndex]
+        /// and triggers a fire-and-forget disk write so data survives app restarts even if
+        /// the user never clicks "Save Audiogram". Called before every memory switch.
         /// </summary>
         private void SaveCurrentMemoryAudiogram()
         {
             var session = BuildSessionFromRows();
-            if ((session.RightEarAudiogram?.Points.Count ?? 0) > 0 || (session.LeftEarAudiogram?.Points.Count ?? 0) > 0)
-                _audioSessionsByMemory[_selectedMemoryIndex] = session;
+            bool hasData = (session.RightEarAudiogram?.Points.Count ?? 0) > 0
+                        || (session.LeftEarAudiogram?.Points.Count  ?? 0) > 0;
+            if (!hasData) return;
+
+            _audioSessionsByMemory[_selectedMemoryIndex] = session;
+
+            // Persist to disk so data survives app restarts.
+            // Fire-and-forget — memory switch must remain synchronous for UX responsiveness.
+            AutoSaveToAppDataAsync();
         }
 
         /// <summary>
@@ -838,8 +913,10 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 await _persistenceService.SaveAsync(_audiogramSession, dlg.FileName).ConfigureAwait(true);
                 StatusMessage = $"Audiogram saved ({MemoryNames[_selectedMemoryIndex]}).";
 
-                // Also persist to app-data so data survives app restarts
-                AutoSaveToAppDataAsync();
+                // Persist to app-data so data survives app restarts.
+                // Awaited here (not fire-and-forget) to guarantee the write completes before
+                // the user can proceed to End Session / close the app.
+                await SaveToAppDataAsync().ConfigureAwait(true);
             }
             catch (Exception ex)
             {
@@ -870,8 +947,8 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                         $"[Audiogram] Loaded from file into Memory='{MemoryNames[_selectedMemoryIndex]}' " +
                         $"Index={_selectedMemoryIndex}");
 
-                    // Persist to app-data so data survives app restarts
-                    AutoSaveToAppDataAsync();
+                    // Persist to app-data (awaited) so data survives app restarts.
+                    await SaveToAppDataAsync().ConfigureAwait(true);
                 }
                 else
                 {
