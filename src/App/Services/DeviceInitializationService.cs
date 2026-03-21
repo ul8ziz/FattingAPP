@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using SDLib;
+using Ul8ziz.FittingApp.App.Services.Diagnostics;
 using Ul8ziz.FittingApp.Device.DeviceCommunication;
 using Ul8ziz.FittingApp.Device.DeviceCommunication.Models;
 
@@ -181,6 +182,7 @@ namespace Ul8ziz.FittingApp.App.Services
                 }
                 catch (Exception ex)
                 {
+                    DiagnosticService.Instance.RecordException("EnsureInitializedAndConfigured", DiagnosticCategory.Device, ex, null, null, side);
                     var inner = ex is TargetInvocationException tie ? tie.InnerException : ex;
                     var msg = inner?.Message ?? ex.Message ?? "";
                     Log($"[EnsureInit] {side}: exception — {msg}");
@@ -279,6 +281,7 @@ namespace Ul8ziz.FittingApp.App.Services
                 }
                 catch (Exception ex)
                 {
+                    DiagnosticService.Instance.RecordException("RunConfigureDevice", DiagnosticCategory.Device, ex, null, null, null);
                     var inner = ex is TargetInvocationException tie ? tie.InnerException : ex;
                     var msg = inner?.Message ?? ex.Message ?? "";
                     ConfigureDeviceLog($"END exception: {msg}");
@@ -416,6 +419,7 @@ namespace Ul8ziz.FittingApp.App.Services
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("ConfigureDevice", DiagnosticCategory.Device, ex, null, null, side);
                 var inner = ex is TargetInvocationException tie ? tie.InnerException : ex;
                 var msg = inner?.Message ?? ex.Message ?? "";
                 ConfigureDeviceLog($"CALL ConfigureDevice failed: {msg}");

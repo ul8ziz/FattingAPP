@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Ul8ziz.FittingApp.App.Services;
+using Ul8ziz.FittingApp.App.Services.Diagnostics;
 using Ul8ziz.FittingApp.App.ViewModels;
 
 namespace Ul8ziz.FittingApp.App.Views
@@ -319,6 +320,7 @@ namespace Ul8ziz.FittingApp.App.Views
                 "SessionSummary" => "SessionSummary",
                 _ => ""
             };
+            DiagnosticContextGatherer.CurrentScreen = string.IsNullOrEmpty(CurrentNavKey) ? null : CurrentNavKey;
             CurrentView = newView;
         }
 

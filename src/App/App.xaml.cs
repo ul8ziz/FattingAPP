@@ -1,6 +1,9 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Threading;
+using Ul8ziz.FittingApp.App.Services.Diagnostics;
 using Ul8ziz.FittingApp.Device.DeviceCommunication;
 using Ul8ziz.FittingApp.App.Helpers;
 using Ul8ziz.FittingApp.App.DeviceCommunication.HiProD2xx;
@@ -19,6 +22,16 @@ namespace Ul8ziz.FittingApp.App
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+
+            // Register DiagnosticBridge so Device layer can record diagnostics
+            var diag = DiagnosticService.Instance;
+            DiagnosticBridge.RecordExceptionCallback = (op, cat, ex, msg) => diag.RecordFromBridge(op, cat, ex, msg);
+            DiagnosticBridge.RecordWarningCallback = (op, cat, msg) => diag.RecordWarningFromBridge(op, cat, msg);
+
+            // Global exception handlers for backend diagnostics
+            DispatcherUnhandledException += OnDispatcherUnhandledException;
+            AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+            TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
             // D2XX-first: configure DLL search and verify ftd2xx/FTD2XX_NET load
             var appBase = AppDomain.CurrentDomain.BaseDirectory ?? "";
@@ -41,6 +54,49 @@ namespace Ul8ziz.FittingApp.App
             DiagnosticRunner.RunDiagnosticsAsync(AppDomain.CurrentDomain.BaseDirectory, autoStopStarkeyInspire: null);
 
             // No COM2 check at startup: wired scan uses D2XX only; COM port state is irrelevant for HI-PRO detection.
+        }
+
+        private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+        {
+            try
+            {
+                var screen = DiagnosticContextGatherer.GetScreenContext();
+                DiagnosticService.Instance.RecordCritical("DispatcherUnhandled", DiagnosticCategory.UnhandledException, e.Exception, screen);
+                ScanDiagnostics.WriteLine($"[Diagnostics] UI unhandled exception: {e.Exception?.Message}");
+            }
+            catch { /* ignore */ }
+            // Preserve default behavior: e.Handled stays false so app can crash if needed
+        }
+
+        private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            try
+            {
+                var ex = e.ExceptionObject as Exception;
+                if (ex != null)
+                {
+                    var screen = DiagnosticContextGatherer.GetScreenContext();
+                    DiagnosticService.Instance.RecordCritical("AppDomainUnhandled", DiagnosticCategory.UnhandledException, ex, screen);
+                    ScanDiagnostics.WriteLine($"[Diagnostics] AppDomain unhandled (IsTerminating={e.IsTerminating}): {ex.Message}");
+                }
+            }
+            catch { /* ignore */ }
+        }
+
+        private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+        {
+            try
+            {
+                var ex = e.Exception?.GetBaseException() ?? e.Exception;
+                if (ex != null)
+                {
+                    var screen = DiagnosticContextGatherer.GetScreenContext();
+                    DiagnosticService.Instance.RecordCritical("UnobservedTask", DiagnosticCategory.UnhandledException, ex, screen);
+                    ScanDiagnostics.WriteLine($"[Diagnostics] Unobserved task exception: {ex.Message}");
+                }
+                e.SetObserved();
+            }
+            catch { /* ignore */ }
         }
     }
 }

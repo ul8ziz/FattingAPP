@@ -14,6 +14,7 @@ using Microsoft.Win32;
 using Ul8ziz.FittingApp.App.Models.Audiogram;
 using Ul8ziz.FittingApp.App.Services;
 using Ul8ziz.FittingApp.App.Services.Audiogram;
+using Ul8ziz.FittingApp.App.Services.Diagnostics;
 using Ul8ziz.FittingApp.App.Views;
 using Ul8ziz.FittingApp.Device.DeviceCommunication.Models;
 
@@ -878,6 +879,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("GenerateWDRC", DiagnosticCategory.Device, ex, "Audiogram", _selectedMemoryIndex, null);
                 StatusMessage = "Generate WDRC failed: " + ex.Message;
                 Debug.WriteLine($"[Audiogram] GenerateWDRC ERROR: {ex}");
             }
@@ -937,6 +939,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("SaveAudiogram", DiagnosticCategory.Persistence, ex, "Audiogram", _selectedMemoryIndex, null);
                 StatusMessage = "Save error: " + ex.Message;
             }
         }
@@ -974,6 +977,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("LoadAudiogram", DiagnosticCategory.Persistence, ex, "Audiogram", _selectedMemoryIndex, null);
                 StatusMessage = "Load error: " + ex.Message;
             }
         }

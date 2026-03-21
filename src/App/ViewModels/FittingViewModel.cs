@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Diagnostics;
 using Ul8ziz.FittingApp.App.Models;
 using Ul8ziz.FittingApp.App.Services;
+using Ul8ziz.FittingApp.App.Services.Diagnostics;
 using Ul8ziz.FittingApp.App.Views;
 using Ul8ziz.FittingApp.Device.DeviceCommunication;
 using Ul8ziz.FittingApp.Device.DeviceCommunication.Models;
@@ -393,7 +394,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             {
                 ErrorMessage = "Failed to load library parameters: " + ex.Message;
                 ShowRetryInErrorBanner = true;
-                LogFittingException("OfflineLoad", ex);
+                DiagnosticService.Instance.RecordException("LoadOffline", DiagnosticCategory.Persistence, ex, "Fitting", _selectedMemoryIndex, null);
             }
             finally
             {
@@ -459,7 +460,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             {
                 ErrorMessage = $"Error switching memory: {ex.Message}";
                 ShowRetryInErrorBanner = true;
-                LogFittingException("MemorySwitch", ex);
+                DiagnosticService.Instance.RecordException("MemorySwitch", DiagnosticCategory.Device, ex, "Fitting", _selectedMemoryIndex, null);
             }
             finally
             {
@@ -840,7 +841,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                         }
                         catch (Exception ex)
                         {
-                            LogFittingException("Left", ex);
+                            DiagnosticService.Instance.RecordException("ReadParameters", DiagnosticCategory.SDK, ex, "Fitting", _selectedMemoryIndex, DeviceSide.Left);
                             ErrorMessage = "Left: " + GetUserFriendlyMessage(ex);
                         }
                     }
@@ -877,7 +878,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                         }
                         catch (Exception ex)
                         {
-                            LogFittingException("Right", ex);
+                            DiagnosticService.Instance.RecordException("ReadParameters", DiagnosticCategory.SDK, ex, "Fitting", _selectedMemoryIndex, DeviceSide.Right);
                             ErrorMessage = string.IsNullOrEmpty(ErrorMessage) ? "Right: " + GetUserFriendlyMessage(ex) : ErrorMessage + "; Right: " + GetUserFriendlyMessage(ex);
                         }
                     }
@@ -897,7 +898,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                LogFittingException("Load", ex);
+                DiagnosticService.Instance.RecordException("LoadSettings", DiagnosticCategory.Device, ex, "Fitting", _selectedMemoryIndex, null);
                 ErrorMessage = "Error: " + GetUserFriendlyMessage(ex);
             }
             finally
@@ -957,6 +958,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("ConfigureDevice", DiagnosticCategory.Device, ex, "Fitting", null, null);
                 System.Diagnostics.Debug.WriteLine($"[FittingVM] ConfigureDevice failed: {ex.Message}");
                 ScanDiagnostics.WriteLine($"[FittingVM] ConfigureDevice failed: " + ex.Message);
                 ErrorMessage = _session.LastConfigError ?? GetUserFriendlyMessage(ex);
@@ -1223,6 +1225,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("SaveEnsureInit", DiagnosticCategory.Device, ex, "Fitting", memoryIndex, side);
                 System.Diagnostics.Debug.WriteLine($"[FittingVM] Save EnsureInit({side}) failed: {ex.Message}");
                 ScanDiagnostics.WriteLine($"[FittingVM] Save EnsureInit({side}) failed: " + ex.Message);
                 ErrorMessage = _session.LastConfigError ?? ex.Message;
@@ -1236,6 +1239,8 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             var ok = await _soundDesigner.BurnMemoryToNvmAsync(product, adaptor, snapshot, memoryIndex, null, ct, onWriteFailed: msg => failureReason = msg ?? failureReason);
             if (!ok)
             {
+                var msg = failureReason ?? "Burn to NVM failed";
+                DiagnosticService.Instance.RecordException("BurnToNvm", DiagnosticCategory.Device, new InvalidOperationException(msg), "Fitting", memoryIndex, side);
                 if (!string.IsNullOrEmpty(failureReason)) ErrorMessage = failureReason;
                 return;
             }
@@ -1243,6 +1248,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             var (verified, verifyMsg) = await _soundDesigner.VerifyMemoryMatchesNvmAsync(product, adaptor, snapshot, memoryIndex, maxItemsToCheck: 50, ct);
             if (!verified && !string.IsNullOrEmpty(verifyMsg))
             {
+                DiagnosticService.Instance.RecordWarning("VerifyNvm", DiagnosticCategory.Device, verifyMsg, "Fitting", memoryIndex, side);
                 ErrorMessage = verifyMsg;
                 return;
             }
@@ -1359,16 +1365,6 @@ namespace Ul8ziz.FittingApp.App.ViewModels
         #endregion
 
         #region Error handling + logging
-
-        private static void LogFittingException(string context, Exception ex)
-        {
-            try
-            {
-                var path = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log.txt");
-                System.IO.File.AppendAllText(path, $"[Fitting] {context}: {ex.GetType().FullName}\r\n{ex.Message}\r\n{ex.StackTrace}\r\n{ex}\r\n---\r\n");
-            }
-            catch { /* ignore */ }
-        }
 
         private static string GetUserFriendlyMessage(Exception ex)
         {

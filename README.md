@@ -351,6 +351,30 @@ An automated **preflight + diagnostics** workflow runs at **app startup (before 
 - `logs\hpro_diag.log` — startup run log
 - `logs\diagnostics\startup_runner_stdout.txt`, `startup_runner_stderr.txt` — captured when run from app
 
+### Backend Diagnostics and Error-Tracking (logs/ layout)
+
+The app includes a **backend-only** diagnostics system that captures unhandled exceptions, handled failures, and important warnings to structured files under `logs/`. No UI changes; all output is written to disk.
+
+**Folder structure (relative to app base directory):**
+
+| Path | Purpose | Format |
+|------|---------|--------|
+| `logs/diagnostics/timeline_YYYYMMDD.log` | Human-readable timeline of events | `[Timestamp] [Category] [Severity] Message \| key=value \| key=value` |
+| `logs/errors/errors_YYYYMMDD.json` | Structured error entries | NDJSON (one JSON object per line) |
+| `logs/crash/crash_YYYYMMDD_HHMMSS.txt` | Fatal crash report | Markdown/text: timestamp, version, OS, exception, stack, context |
+| `logs/warnings/` | Optional: warnings only | Same line format as timeline (or merged into timeline) |
+
+**Rolling:** Daily files by date. Crash reports get a unique timestamp in the filename.
+
+**What is captured:**
+- **Unhandled exceptions:** `DispatcherUnhandledException`, `AppDomain.UnhandledException`, `TaskScheduler.UnobservedTaskException` → Critical severity + crash report
+- **Handled failures:** SDK exceptions, communication errors, read/write failures, scan/connect failures → Error severity
+- **Warnings:** Partial failure, validation block, stale state → Warning severity
+
+**Context attached to each entry:** Operation name, current screen, memory index, device side, connection state, serial IDs, library/firmware, and custom key-value pairs.
+
+**How to use:** When reporting a bug or crash, attach the relevant `logs/crash/crash_*.txt` file and any `logs/errors/errors_*.json` from the same day. The timeline log helps trace the sequence of events leading to a failure.
+
 **From the app:** At startup, the app runs preflight + diagnostics in the background (no UI block) before any SDK/scan; if scripts are missing, the app continues normally. To re-run diagnostics, use the command line (see below).
 
 **Config (appsettings.json):** In the app output directory (next to the .exe), `appsettings.json` can include:

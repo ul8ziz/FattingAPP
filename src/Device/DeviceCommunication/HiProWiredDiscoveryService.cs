@@ -111,6 +111,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             }
             catch (Exception ex)
             {
+                DiagnosticBridge.RecordException("DiscoverRightPort", "Scan", ex, null);
                 Log($"[Right] Right-port detection threw unhandled exception (non-fatal): {ex.Message}");
                 rightResult = new DiscoveredDevice
                 {
@@ -254,6 +255,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 }
                 catch (Exception ex)
                 {
+                    DiagnosticBridge.RecordException("DetectOnePort", "Scan", ex, $"port={portLabel}");
                     if (adaptor != null)
                         SdkGate.Run($"CloseAdaptor_{portLabel}_ex", () => CloseAdaptorSync(adaptor, portLabel));
                     adaptor = null;

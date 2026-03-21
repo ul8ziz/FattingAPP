@@ -16,6 +16,7 @@ using Ul8ziz.FittingApp.Device.DeviceCommunication.Models;
 using Ul8ziz.FittingApp.App.Helpers;
 using Ul8ziz.FittingApp.App.DeviceCommunication.HiProD2xx;
 using Ul8ziz.FittingApp.App.Services;
+using Ul8ziz.FittingApp.App.Services.Diagnostics;
 
 namespace Ul8ziz.FittingApp.App.Views
 {
@@ -150,6 +151,7 @@ namespace Ul8ziz.FittingApp.App.Views
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("SdkInit", DiagnosticCategory.Connection, ex, "ConnectDevices", null, null);
                 var errorDetail = ex.Message;
                 if (ex.InnerException != null)
                     errorDetail += $"\nCause: {ex.InnerException.Message}";
@@ -194,6 +196,7 @@ namespace Ul8ziz.FittingApp.App.Views
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("LoadLibrary", DiagnosticCategory.Persistence, ex, "ConnectDevices", null, null);
                 System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Failed to load default library: {ex.Message}");
             }
         }
@@ -604,6 +607,7 @@ namespace Ul8ziz.FittingApp.App.Views
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("ScanProgrammers", DiagnosticCategory.Scan, ex, "ConnectDevices", null, null);
                 System.Diagnostics.Debug.WriteLine($"=== SearchProgrammers ERROR ===");
                 System.Diagnostics.Debug.WriteLine($"Error: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"Type: {ex.GetType().Name}");
@@ -880,6 +884,7 @@ namespace Ul8ziz.FittingApp.App.Views
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("DiscoverDevices", DiagnosticCategory.Scan, ex, "ConnectDevices", null, null);
                 IsDiscovering = false;
                 HasFoundDevices = false;
                 var msg = ex.Message;
@@ -989,6 +994,7 @@ namespace Ul8ziz.FittingApp.App.Views
                 }
                 catch (Exception ex)
                 {
+                    DiagnosticService.Instance.RecordException("ReloadForFirmware", DiagnosticCategory.Connection, ex, "ConnectDevices", null, null);
                     System.Diagnostics.Debug.WriteLine($"[ConnectDevices] ReloadForFirmware FAILED: {ex.Message}");
                     throw new InvalidOperationException(
                         $"No library found for firmware '{detectedFirmware}'.\n\n" +
@@ -1039,6 +1045,7 @@ namespace Ul8ziz.FittingApp.App.Views
                     }
                     catch (Exception ex)
                     {
+                        DiagnosticService.Instance.RecordException("ConnectDevice", DiagnosticCategory.Connection, ex, "ConnectDevices", null, side);
                         var msg = ex.Message;
                         if (msg.IndexOf("E_SEND_FAILURE", StringComparison.OrdinalIgnoreCase) >= 0 || msg.IndexOf("sending data", StringComparison.OrdinalIgnoreCase) >= 0)
                             msg = "Communication error. Check cable, seating, and contacts.";
@@ -1162,6 +1169,7 @@ namespace Ul8ziz.FittingApp.App.Views
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("Connect", DiagnosticCategory.Connection, ex, "ConnectDevices", null, null);
                 IsConnecting = false;
                 IsConnected = false;
                 ConnectionStatusMessage = "Connection failed";

@@ -327,6 +327,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 }
                 catch (Exception ex)
                 {
+                    DiagnosticBridge.RecordException("ReadParameters", "SDK", ex, $"memory={memoryIndex + 1} space={space}");
                     var inner = ex is TargetInvocationException t ? t.InnerException ?? ex : ex;
                     Debug.WriteLine($"[SoundDesigner] ReadParameters({space}) memory={memoryIndex + 1} error: {inner.Message}");
                     if (ScanDiagnostics.IsSdException(ex))
@@ -470,6 +471,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                             }
                             catch (Exception ex)
                             {
+                                DiagnosticBridge.RecordException("BurnToNvm", "Device", ex, $"memory={memoryIndex + 1}");
                                 var inner = ex is TargetInvocationException tie ? tie.InnerException ?? ex : ex;
                                 throw new InvalidOperationException($"NVM write failed: {inner.Message}", ex);
                             }
@@ -548,6 +550,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             }
             catch (Exception ex)
             {
+                DiagnosticBridge.RecordException("WriteToDevice", "Device", ex, null);
                 var inner = ex is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : ex;
                 var message = inner.Message ?? ex.Message ?? "Unknown error.";
                 if (ScanDiagnostics.IsSdException(ex))
@@ -619,6 +622,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
             }
             catch (Exception ex)
             {
+                DiagnosticBridge.RecordException("VerifyNvm", "Device", ex, $"memory={memoryIndex + 1}");
                 var inner = ex is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : ex;
                 var msg = inner.Message ?? ex.Message ?? "Unknown error.";
                 Debug.WriteLine($"[NVM] Verify M{memoryIndex + 1} FAIL: {msg}");

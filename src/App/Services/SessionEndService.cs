@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using Ul8ziz.FittingApp.App.Services.Diagnostics;
 using Ul8ziz.FittingApp.App.ViewModels;
 using Ul8ziz.FittingApp.Device.DeviceCommunication;
 using Ul8ziz.FittingApp.Device.DeviceCommunication.Models;
@@ -64,6 +65,7 @@ namespace Ul8ziz.FittingApp.App.Services
                 }
                 catch (Exception ex)
                 {
+                    DiagnosticService.Instance.RecordException("SessionEndEnsureInit", DiagnosticCategory.Session, ex, "SessionEnd", null, DeviceSide.Left);
                     System.Diagnostics.Debug.WriteLine($"[SessionEnd] EnsureInitializedAndConfigured(Left) failed: {ex.Message}");
                     ScanDiagnostics.WriteLine($"[SessionEnd] EnsureInitializedAndConfigured(Left) failed: " + ex.Message);
                     return (false, session.LastConfigError ?? ex.Message);
@@ -77,6 +79,7 @@ namespace Ul8ziz.FittingApp.App.Services
                 }
                 catch (Exception ex)
                 {
+                    DiagnosticService.Instance.RecordException("SessionEndEnsureInit", DiagnosticCategory.Session, ex, "SessionEnd", null, DeviceSide.Right);
                     System.Diagnostics.Debug.WriteLine($"[SessionEnd] EnsureInitializedAndConfigured(Right) failed: {ex.Message}");
                     ScanDiagnostics.WriteLine($"[SessionEnd] EnsureInitializedAndConfigured(Right) failed: " + ex.Message);
                     return (false, session.LastConfigError ?? ex.Message);
@@ -202,6 +205,7 @@ namespace Ul8ziz.FittingApp.App.Services
                     }
                     catch (Exception ex)
                     {
+                        DiagnosticService.Instance.RecordException("SessionEndSave", DiagnosticCategory.Session, ex, "SessionEnd", null, null);
                         saveFailureReason = saveFailureReason ?? GetDisplayMessage(ex);
                         System.Diagnostics.Debug.WriteLine($"SessionEnd: SaveToDevice error: {saveFailureReason}");
                         ScanDiagnostics.WriteLine($"[SessionEnd] SaveToDevice failed: {saveFailureReason}");
@@ -258,6 +262,7 @@ namespace Ul8ziz.FittingApp.App.Services
             }
             catch (Exception ex)
             {
+                DiagnosticService.Instance.RecordException("SessionEnd", DiagnosticCategory.Session, ex, "SessionEnd", null, null);
                 System.Diagnostics.Debug.WriteLine($"SessionEnd error: {ex.Message}");
                 await dispatcher.InvokeAsync(() =>
                 {
