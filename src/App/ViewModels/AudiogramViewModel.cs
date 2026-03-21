@@ -783,7 +783,10 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 if (!validation.IsValid)
                 {
                     ValidationMessage = "Cannot generate: " + string.Join("; ", validation.Errors);
-                    StatusMessage = "Validation failed. Correct errors before generating.";
+                    bool hasDuplicates = validation.Errors.Any(e => e.IndexOf("Duplicate", StringComparison.OrdinalIgnoreCase) >= 0);
+                    StatusMessage = hasDuplicates
+                        ? "Cannot generate WDRC until duplicate frequencies are resolved."
+                        : "Validation failed. Correct errors before generating.";
                     Debug.WriteLine("[Audiogram] GenerateWDRC ABORTED — validation failed: " + string.Join("; ", validation.Errors));
                     return;
                 }
@@ -900,6 +903,20 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 StatusMessage = "Nothing to save — enter audiogram data first.";
                 return;
             }
+
+            // Block save if audiogram has validation errors (e.g. duplicate frequencies)
+            var validation = _validationService.Validate(_audiogramSession, validateLeft: true, validateRight: true);
+            if (!validation.IsValid)
+            {
+                ValidationMessage = "Cannot save: " + string.Join("; ", validation.Errors);
+                bool hasDuplicates = validation.Errors.Any(e => e.IndexOf("Duplicate", StringComparison.OrdinalIgnoreCase) >= 0);
+                StatusMessage = hasDuplicates
+                    ? "Cannot save audiogram until duplicate frequencies are resolved."
+                    : "Validation failed. Correct errors before saving.";
+                return;
+            }
+            if (validation.Warnings.Count > 0)
+                ValidationMessage = "Warnings: " + string.Join("; ", validation.Warnings);
 
             var dlg = new SaveFileDialog
             {

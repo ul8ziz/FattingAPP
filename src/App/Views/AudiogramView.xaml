@@ -138,8 +138,8 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <!-- ═══ Outer scroll wrapper ═══ -->
-    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+    <!-- ═══ Outer scroll wrapper — HorizontalScrollBarVisibility=Disabled prevents long status/warning text from expanding page width ═══ -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="20,14,20,20">
 
             <!-- ═══ HEADER ROW: Title + Memory selector ═══ -->
@@ -461,18 +461,6 @@
                                 <DataGridTextColumn Header="8k"   Binding="{Binding Val8k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
                             </DataGrid.Columns>
                         </DataGrid>
-
-                        <!-- Right table actions -->
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <Button Content="Clear Right"
-                                    Command="{Binding ClearRightCommand}"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Padding="10,4" Margin="0,0,6,0" FontSize="11"/>
-                            <Button Content="Copy >>"
-                                    Command="{Binding CopyRightToLeftCommand}"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Padding="10,4" FontSize="11"/>
-                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -507,18 +495,6 @@
                                 <DataGridTextColumn Header="8k"   Binding="{Binding Val8k,  UpdateSourceTrigger=LostFocus}" Width="*" HeaderStyle="{StaticResource FreqHeaderStyle}"/>
                             </DataGrid.Columns>
                         </DataGrid>
-
-                        <!-- Left table actions -->
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0" HorizontalAlignment="Right">
-                            <Button Content="&lt;&lt; Copy"
-                                    Command="{Binding CopyLeftToRightCommand}"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Padding="10,4" Margin="0,0,6,0" FontSize="11"/>
-                            <Button Content="Clear Left"
-                                    Command="{Binding ClearLeftCommand}"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Padding="10,4" FontSize="11"/>
-                        </StackPanel>
                     </StackPanel>
                 </Border>
             </Grid>
@@ -572,20 +548,27 @@
                 </Grid>
             </Border>
 
-            <!-- ═══ VALIDATION / STATUS MESSAGES ═══ -->
-            <StackPanel Margin="0,8,0,0">
-                <TextBlock Text="{Binding ValidationMessage}"
-                           Style="{StaticResource CaptionStyle}"
-                           Foreground="{StaticResource DangerBrush}"
-                           TextWrapping="Wrap"
-                           Visibility="{Binding ValidationMessage, Converter={StaticResource StringToVisibilityConverter}}"/>
-                <TextBlock Text="{Binding StatusMessage}"
-                           Style="{StaticResource CaptionStyle}"
-                           Foreground="{StaticResource TextSecondaryBrush}"
-                           TextWrapping="Wrap"
-                           Margin="0,4,0,0"
-                           Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}"/>
-            </StackPanel>
+            <!-- ═══ VALIDATION / STATUS MESSAGES — constrained width so long text wraps, no horizontal expansion ═══ -->
+            <Grid Margin="0,8,0,0" HorizontalAlignment="Stretch">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="{Binding ValidationMessage}"
+                               Style="{StaticResource CaptionStyle}"
+                               Foreground="{StaticResource DangerBrush}"
+                               TextWrapping="Wrap"
+                               HorizontalAlignment="Stretch"
+                               Visibility="{Binding ValidationMessage, Converter={StaticResource StringToVisibilityConverter}}"/>
+                    <TextBlock Text="{Binding StatusMessage}"
+                               Style="{StaticResource CaptionStyle}"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               HorizontalAlignment="Stretch"
+                               Margin="0,4,0,0"
+                               Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}"/>
+                </StackPanel>
+            </Grid>
 
         </StackPanel>
     </ScrollViewer>

@@ -51,7 +51,7 @@ FattingAPP/
 │       └── HiproD2xxProbe/        # HI-PRO D2XX probe
 ├── installer/                     # Inno Setup script (FittingApp.iss) → setup.exe
 ├── scripts/                       # publish-release.ps1, diagnostics, check-ftdi, etc.
-├── docs/                          # HI-PRO_D2XX, FITTING_DEVELOPER_NOTE, SCAN_REQUIREMENTS, etc.
+├── docs/                          # HI-PRO_D2XX, FITTING_DEVELOPER_NOTE, SCAN_REQUIREMENTS, connect-devices-screen, audiogram-screen, fitting-screen, etc.
 ├── publish/                       # Publish output (gitignored): FittingApp/, *.zip, *-Setup-*.exe
 └── SoundDesignerSDK/              # Ezairo SDK (read-only; must exist at repo root for setup)
 ```
@@ -151,27 +151,29 @@ If only one device is connected (e.g. left ear only), the dialog states that sav
 
 The app now follows a **memory-aware, library-first** workflow specifically designed for the Ezairo 7111 V2:
 
-1. **Single-memory display**: Instead of rendering all 8 memories at once (4760 parameters), the app shows only the selected memory (~595 parameters). A **Memory Selector** (ComboBox: Memory 1-8) in the Fitting toolbar lets the user switch between memory profiles instantly.
+1. **Shared memory selection:** **DeviceSessionService.SelectedMemoryIndex** is the single source of truth when a device is connected. Both **Audiogram** and **Fitting** screens bind to this shared state. Changing memory in one screen updates the other immediately; navigation preserves the same active memory. Generate WDRC, Save Current Memory, Reload from NVM, and parameter display all use this shared memory.
 
-2. **Automatic .param loading**: When a library is selected (e.g., `E7111V2.library`), the app auto-loads the matching `.param` file (`E7111V2.param`) from the products directory. This applies the preset values to the offline product, so parameter controls show meaningful defaults instead of zeros.
+2. **Single-memory display**: Instead of rendering all 8 memories at once (4760 parameters), the app shows only the selected memory (~595 parameters). A **Memory Selector** (ComboBox: Memory 1-8) in the Fitting toolbar lets the user switch between memory profiles instantly.
 
-3. **Per-memory snapshots**: `SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, memoryIndex, side)` enumerates only one `ParameterMemory` (via `Product.Memories[index]`). Each module tab has a single section instead of 8 stacked Memory sections.
+3. **Automatic .param loading**: When a library is selected (e.g., `E7111V2.library`), the app auto-loads the matching `.param` file (`E7111V2.param`) from the products directory. This applies the preset values to the offline product, so parameter controls show meaningful defaults instead of zeros.
 
-4. **True UI Virtualization**: The Fitting page uses a `Grid` layout (no outer `ScrollViewer`) with `ListView` + `VirtualizingStackPanel` for parameter rendering. This gives the list a constrained height so only visible items (~10-15) are rendered, not all ~300+ in a tab. The previous approach wrapped everything in a `ScrollViewer`, which gave infinite height and defeated virtualization.
+4. **Per-memory snapshots**: `SoundDesignerSettingsEnumerator.BuildSnapshotForMemory(product, memoryIndex, side)` enumerates only one `ParameterMemory` (via `Product.Memories[index]`). Each module tab has a single section instead of 8 stacked Memory sections.
 
-5. **Cached Tab Items**: `FittingViewModel` pre-builds `SettingItemViewModel` wrappers once per snapshot load (`BuildItemCaches`), stored per-tab in a `Dictionary`. Tab switching now just filters the cached list — no object recreation. This eliminates the `BuildFilteredCategories` bottleneck that created new ViewModels on every tab change.
+5. **True UI Virtualization**: The Fitting page uses a `Grid` layout (no outer `ScrollViewer`) with `ListView` + `VirtualizingStackPanel` for parameter rendering. This gives the list a constrained height so only visible items (~10-15) are rendered, not all ~300+ in a tab. The previous approach wrapped everything in a `ScrollViewer`, which gave infinite height and defeated virtualization.
 
-6. **Lazy memory cache + swap-only UI update**: On first navigation, the app reads only the selected memory (default Memory 1). On Memory selector change, tab metadata is not rebuilt; the app loads the memory snapshot only if missing in cache, then swaps `LeftSnapshot` / `RightSnapshot` bindings and refreshes rows from cache.
+6. **Cached Tab Items**: `FittingViewModel` pre-builds `SettingItemViewModel` wrappers once per snapshot load (`BuildItemCaches`), stored per-tab in a `Dictionary`. Tab switching now just filters the cached list — no object recreation. This eliminates the `BuildFilteredCategories` bottleneck that created new ViewModels on every tab change.
 
-7. **Per-memory dirty tracking**: Dirty state is tracked per `(Side, MemoryIndex)`. Editing Memory N marks only that memory dirty. The `[Memory] Dirty side=... memory=... changedParam=...` log is emitted **only the first time** a memory becomes dirty (until save clears it), to avoid log spam from repeated slider or binding updates. Save button enablement is memory-aware: **Save to Device** requires selected memory dirty; **Save ALL Memories** requires any memory dirty.
+7. **Lazy memory cache + swap-only UI update**: On first navigation, the app reads only the selected memory (default Memory 1). On Memory selector change, tab metadata is not rebuilt; the app loads the memory snapshot only if missing in cache, then swaps `LeftSnapshot` / `RightSnapshot` bindings and refreshes rows from cache.
 
-8. **Memory-scoped save APIs (NVM-only):** `SoundDesignerService` exposes `ReloadFromNvmAsync`, `BurnMemoryToNvmAsync`, `VerifyMemoryMatchesNvmAsync` (semantics per SDK sample `presuite_memory_switch.py`). Fitting uses **Save Current Memory** (Burn to NVM + verify) and **Save ALL Memories** (Burn all dirty to NVM + verify); End Session **Save and End** calls the same NVM save path by default. On connect and memory switch, load uses **Reload from NVM** (Restore + Read from RAM).
+8. **Per-memory dirty tracking**: Dirty state is tracked per `(Side, MemoryIndex)`. Editing Memory N marks only that memory dirty. The `[Memory] Dirty side=... memory=... changedParam=...` log is emitted **only the first time** a memory becomes dirty (until save clears it), to avoid log spam from repeated slider or binding updates. Save button enablement is memory-aware: **Save to Device** requires selected memory dirty; **Save ALL Memories** requires any memory dirty.
 
-9. **Save reliability on memory switch**: Before each memory write, `WriteMemorySnapshotAsync(...)` now rebuilds a fresh snapshot for that memory from the SDK (`BuildSnapshotForMemory`) and maps edited values by parameter Id onto fresh SDK refs. This avoids stale parameter references after memory switching and reduces false write/verify mismatches.
+9. **Memory-scoped save APIs (NVM-only):** `SoundDesignerService` exposes `ReloadFromNvmAsync`, `BurnMemoryToNvmAsync`, `VerifyMemoryMatchesNvmAsync` (semantics per SDK sample `presuite_memory_switch.py`). Fitting uses **Save Current Memory** (Burn to NVM + verify) and **Save ALL Memories** (Burn all dirty to NVM + verify); End Session **Save and End** calls the same NVM save path by default. On connect and memory switch, load uses **Reload from NVM** (Restore + Read from RAM).
 
-10. **Read-back verification tolerance for quantized parameters**: Save verification now accepts small numeric read-back quantization (for parameters that round to device step values, e.g. 0.1 increments) so valid writes do not fail with false mismatches like `-12.477...` vs `-12.5`. **Parameter value access (SDK):** Per Sound Designer SDK Programmer's Guide (Section 6.5, Table 3), Double and Boolean parameters use DoubleValue/BooleanValue; the app uses these typed properties first for numeric and bool types when applying snapshot values during save to avoid E_INVALID_OPERATION and reduce log noise.
+10. **Save reliability on memory switch**: Before each memory write, `WriteMemorySnapshotAsync(...)` now rebuilds a fresh snapshot for that memory from the SDK (`BuildSnapshotForMemory`) and maps edited values by parameter Id onto fresh SDK refs. This avoids stale parameter references after memory switching and reduces false write/verify mismatches.
 
-11. **Professional Per-Type Parameter UI**: Each parameter row uses a 3-column layout:
+11. **Read-back verification tolerance for quantized parameters**: Save verification now accepts small numeric read-back quantization (for parameters that round to device step values, e.g. 0.1 increments) so valid writes do not fail with false mismatches like `-12.477...` vs `-12.5`. **Parameter value access (SDK):** Per Sound Designer SDK Programmer's Guide (Section 6.5, Table 3), Double and Boolean parameters use DoubleValue/BooleanValue; the app uses these typed properties first for numeric and bool types when applying snapshot values during save to avoid E_INVALID_OPERATION and reduce log noise.
+
+12. **Professional Per-Type Parameter UI**: Each parameter row uses a 3-column layout:
    - **Bool**: Label on the left, CheckBox toggle on the right
    - **Double/Int**: Label + Slider with min/max labels + formatted value with unit
    - **Enum**: Label + ComboBox dropdown
@@ -179,7 +181,7 @@ The app now follows a **memory-aware, library-first** workflow specifically desi
    
    Parameters also show description subtitles and step-aware slider snapping.
 
-12. **Premium parameter field redesign (Fitting page):** Parameter controls use a modern, enterprise-grade UI:
+13. **Premium parameter field redesign (Fitting page):** Parameter controls use a modern, enterprise-grade UI:
    - **ParameterFieldCard** (`Views/Controls/ParameterFieldCard.xaml`): Each parameter is rendered as a card row with title, optional description, value control on the right, unit badge, optional reset button, and dirty (unsaved) indicator.
    - **ParameterFieldStyles.xaml**: Shared styles for card, labels, unit badge, modern ComboBox, Slider, Toggle switch, and numeric input. Collapsible **Expander** per tab shows group header (tab title + param count).
    - **Virtualization**: ListView with VirtualizingStackPanel is retained for smooth scrolling with many parameters. Bindings and parameter load/save logic are unchanged.
@@ -469,6 +471,9 @@ To build a **runnable, self-contained** version that you can copy to another PC 
 - **[docs/HI-PRO_D2XX.md](docs/HI-PRO_D2XX.md)** — D2XX setup, x86, DLL locations, common errors.
 - **[docs/FITTING_DEVELOPER_NOTE.md](docs/FITTING_DEVELOPER_NOTE.md)** — Interpreting debug output (log.txt, Output window), build vs runtime, key types and locations.
 - **[docs/SCAN_REQUIREMENTS.md](docs/SCAN_REQUIREMENTS.md)** — Programmer scan requirements and troubleshooting.
+- **[docs/connect-devices-screen.md](docs/connect-devices-screen.md)** — Connect Devices screen: flows, UI structure, library/programmer/scan/discovery/connection workflows, error handling.
+- **[docs/audiogram-screen.md](docs/audiogram-screen.md)** — Audiogram screen: chart/numeric workflow, memory sync, validation, persistence, Generate WDRC, integration with Fitting.
+- **[docs/fitting-screen.md](docs/fitting-screen.md)** — Fitting screen: parameter loading, tab/group generation, editing, save/reload workflows, memory sync, WDRC, session integration.
 - **Setup:** [docs/Setup.md](docs/Setup.md) (if present); otherwise see [Prerequisites](#prerequisites) and [Setup Steps](#setup-steps) in this README.
 - **Installer:** [installer/README.md](installer/README.md) — How to build the Windows setup (Inno Setup) manually.
 

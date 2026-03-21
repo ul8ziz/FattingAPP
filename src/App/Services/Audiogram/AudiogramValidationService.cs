@@ -74,7 +74,7 @@ namespace Ul8ziz.FittingApp.App.Services.Audiogram
                 if (p.FrequencyHz <= 0 || p.FrequencyHz > 20000)
                     result.Errors.Add($"Invalid frequency: {p.FrequencyHz} Hz.");
                 if (seenFreq.Contains(p.FrequencyHz))
-                    result.Warnings.Add($"Duplicate frequency: {p.FrequencyHz} Hz.");
+                    result.Errors.Add($"Duplicate frequency: {p.FrequencyHz} Hz.");
                 seenFreq.Add(p.FrequencyHz);
 
                 if (p.ThresholdDbHL.HasValue)

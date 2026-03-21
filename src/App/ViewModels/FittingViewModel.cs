@@ -78,7 +78,19 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             _session.RequestStopLiveMode += OnRequestStopLiveMode;
             _session.PropertyChanged += (_, e) =>
             {
-                if (e.PropertyName == nameof(DeviceSessionService.IsConfigured) ||
+                if (e.PropertyName == nameof(DeviceSessionService.SelectedMemoryIndex))
+                {
+                    // Sync from shared source when Audiogram (or another screen) changes memory
+                    int incoming = _session.SelectedMemoryIndex;
+                    if (_selectedMemoryIndex != incoming)
+                    {
+                        _selectedMemoryIndex = incoming;
+                        OnPropertyChanged(nameof(SelectedMemoryIndex));
+                        OnPropertyChanged(nameof(SelectedMemoryName));
+                        _ = OnMemoryChangedAsync();
+                    }
+                }
+                else if (e.PropertyName == nameof(DeviceSessionService.IsConfigured) ||
                     e.PropertyName == nameof(DeviceSessionService.LastConfigError) ||
                     e.PropertyName == nameof(DeviceSessionService.LeftConnected) ||
                     e.PropertyName == nameof(DeviceSessionService.RightConnected) ||
@@ -734,6 +746,11 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                     IsLoading = false;
                     return;
                 }
+
+                // Sync selected memory from shared source (DeviceSessionService) so Audiogram and Fitting stay aligned
+                _selectedMemoryIndex = _session.SelectedMemoryIndex;
+                OnPropertyChanged(nameof(SelectedMemoryIndex));
+                OnPropertyChanged(nameof(SelectedMemoryName));
 
                 // If we already know the device is not configured (from a previous Ensure run), skip redundant
                 // InitializeDevice + probe and just build library snapshots so LoadSettings finishes quickly.
