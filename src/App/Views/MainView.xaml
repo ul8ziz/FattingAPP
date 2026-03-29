@@ -265,6 +265,21 @@
                                 </Button.Content>
                             </Button>
 
+                            <!-- Quick Fitting: second item after Connect — abbreviated controls (same session as Fitting) -->
+                            <Button Style="{StaticResource SidebarNavButtonQuickFittingStyle}"
+                                    Command="{Binding NavigateCommand}"
+                                    CommandParameter="QuickFitting"
+                                    IsEnabled="{Binding IsNavigationEnabled}"
+                                    Margin="0,0,0,4"
+                                    ToolTip="Fast access to FBC, noise reduction, and memory controls">
+                                <Button.Content>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE8F1;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Quick Fitting" FontFamily="Segoe UI" FontSize="14" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+
                             <!-- Audiogram — requires a connected hearing aid (same guard as Fitting) -->
                             <Button Style="{StaticResource SidebarNavButtonAudiogramStyle}"
                                     Command="{Binding NavigateCommand}"
@@ -317,7 +332,7 @@
                             BorderThickness="0,1,0,0"
                             Padding="16,16">
                         <StackPanel>
-                            <TextBlock Text="System Info"
+                            <TextBlock Text="Software Info"
                                        FontFamily="Segoe UI"
                                        FontSize="13"
                                        FontWeight="SemiBold"

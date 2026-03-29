@@ -23,6 +23,10 @@ namespace Ul8ziz.FittingApp.App.Views
         // AudiogramView is cached so the AudiogramViewModel (and its per-memory audiogram data) survives navigation.
         // Creating a new AudiogramView on every navigation would recreate the VM and lose all entered clinical data.
         private AudiogramView? _cachedAudiogramView;
+        /// <summary>Shared between Fitting and Quick Fitting so both screens reflect the same snapshots and dirty state.</summary>
+        private FittingViewModel? _sharedFittingViewModel;
+        private FittingView? _cachedFittingView;
+        private QuickFittingView? _cachedQuickFittingView;
 
         public MainView()
         {
@@ -38,8 +42,10 @@ namespace Ul8ziz.FittingApp.App.Views
                     _cachedConnectDevicesView = new ConnectDevicesView();
                     _cachedConnectDevicesView.OnConnectionSucceeded = () =>
                     {
-                        _viewModel.CurrentNavKey = "Fitting";
-                        _viewModel.CurrentView = new FittingView();
+                        // Second step after connect: Quick Fitting (abbreviated screen)
+                        _viewModel.CurrentNavKey = "QuickFitting";
+                        _viewModel.CurrentView = GetOrCreateQuickFittingView();
+                        GetOrCreateSharedFittingViewModel().OnNavigatedTo();
                     };
                 }
                 return _cachedConnectDevicesView;
@@ -52,7 +58,7 @@ namespace Ul8ziz.FittingApp.App.Views
                     {
                         if (!AppSessionState.Instance.IsNavigationEnabled) return;
                         _viewModel.CurrentNavKey = navKey;
-                        _viewModel.CurrentView   = navKey == "Fitting" ? (UserControl)new FittingView() : GetOrCreateAudiogramView();
+                        _viewModel.CurrentView   = navKey == "Fitting" ? (UserControl)GetOrCreateFittingView() : GetOrCreateAudiogramView();
                     });
                 }
                 return _cachedAudiogramView;
@@ -65,12 +71,17 @@ namespace Ul8ziz.FittingApp.App.Views
             };
             _viewModel.NavigateToConnectAndRestartDiscovery = () =>
             {
+                _sharedFittingViewModel = null;
+                _cachedFittingView = null;
+                _cachedQuickFittingView = null;
                 var connectView = _viewModel.CreateConnectView?.Invoke() ?? new ConnectDevicesView();
                 connectView.ResetForInactiveConnection();
                 _viewModel.CurrentNavKey = "ConnectDevices";
                 _viewModel.CurrentView = connectView;
                 connectView.StartWiredDiscoveryAfterDebounce();
             };
+            _viewModel.CreateFittingView = () => GetOrCreateFittingView();
+            _viewModel.CreateQuickFittingView = () => GetOrCreateQuickFittingView();
             // Wire audiogram flush: called before session end to guarantee disk persistence.
             // The lambda captures _cachedAudiogramView by reference — if the user never
             // navigated to Audiogram, _cachedAudiogramView is null and the flush is a no-op.
@@ -135,6 +146,28 @@ namespace Ul8ziz.FittingApp.App.Views
         private AudiogramView GetOrCreateAudiogramView() =>
             _viewModel.CreateAudiogramView?.Invoke() ?? new AudiogramView();
 
+        private FittingViewModel GetOrCreateSharedFittingViewModel()
+        {
+            _sharedFittingViewModel ??= new FittingViewModel();
+            return _sharedFittingViewModel;
+        }
+
+        private FittingView GetOrCreateFittingView()
+        {
+            var vm = GetOrCreateSharedFittingViewModel();
+            if (_cachedFittingView == null)
+                _cachedFittingView = new FittingView(vm);
+            return _cachedFittingView;
+        }
+
+        private QuickFittingView GetOrCreateQuickFittingView()
+        {
+            var vm = GetOrCreateSharedFittingViewModel();
+            if (_cachedQuickFittingView == null)
+                _cachedQuickFittingView = new QuickFittingView(vm);
+            return _cachedQuickFittingView;
+        }
+
         private void NavigateToConnectDevices()
         {
             _viewModel.CurrentNavKey = "ConnectDevices";
@@ -198,6 +231,10 @@ namespace Ul8ziz.FittingApp.App.Views
         /// AudiogramViewModel (and its per-memory clinical data) survive sidebar navigation.
         /// </summary>
         public Func<AudiogramView>? CreateAudiogramView { get; set; }
+        /// <summary>Factory for cached Fitting view with shared <see cref="FittingViewModel"/>.</summary>
+        public Func<UserControl>? CreateFittingView { get; set; }
+        /// <summary>Factory for cached Quick Fitting view (same VM as Fitting).</summary>
+        public Func<UserControl>? CreateQuickFittingView { get; set; }
         public Func<EndSessionDialogResult>? ShowEndSessionDialog { get; set; }
         public Action? NavigateToConnectAndRestartDiscovery { get; set; }
         public Action<string>? ShowToast { get; set; }
@@ -223,7 +260,7 @@ namespace Ul8ziz.FittingApp.App.Views
             set { _currentView = value; OnPropertyChanged(); }
         }
 
-        /// <summary>Current navigation key for sidebar highlight (ConnectDevices, Audiogram, Fitting, SessionSummary, or empty).</summary>
+        /// <summary>Current navigation key for sidebar highlight (ConnectDevices, Audiogram, Fitting, QuickFitting, SessionSummary, or empty).</summary>
         public string CurrentNavKey
         {
             get => _currentNavKey;
@@ -296,7 +333,8 @@ namespace Ul8ziz.FittingApp.App.Views
                 "ConnectDevices" => CreateConnectView?.Invoke() ?? new ConnectDevicesView(),
                 // Return the SAME cached AudiogramView each time so its VM and per-memory data survive navigation.
                 "Audiogram" => CreateAudiogramView?.Invoke() ?? new AudiogramView(),
-                "Fitting" => new FittingView(),
+                "Fitting" => CreateFittingView?.Invoke() ?? new FittingView(),
+                "QuickFitting" => CreateQuickFittingView?.Invoke() ?? new QuickFittingView(),
                 "SessionSummary" => new UserControl
                 {
                     Content = new TextBlock 
@@ -317,11 +355,15 @@ namespace Ul8ziz.FittingApp.App.Views
                 "ConnectDevices" => "ConnectDevices",
                 "Audiogram" => "Audiogram",
                 "Fitting" => "Fitting",
+                "QuickFitting" => "QuickFitting",
                 "SessionSummary" => "SessionSummary",
                 _ => ""
             };
             DiagnosticContextGatherer.CurrentScreen = string.IsNullOrEmpty(CurrentNavKey) ? null : CurrentNavKey;
             CurrentView = newView;
+            if (newView?.DataContext is FittingViewModel fvm &&
+                (viewName == "Fitting" || viewName == "QuickFitting"))
+                fvm.OnNavigatedTo();
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

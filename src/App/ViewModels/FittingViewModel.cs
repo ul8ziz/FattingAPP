@@ -306,6 +306,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             set
             {
                 _leftSnapshot = value;
+                FittingUiCustomization.ApplyToSnapshot(_leftSnapshot);
                 _session.SetFittingSnapshots(_leftSnapshot, _rightSnapshot);
                 if (_leftSnapshot != null) _settingsCache.SetSnapshot(DeviceSide.Left, _leftSnapshot);
                 SubscribeSnapshotDirty(_leftSnapshot, _rightSnapshot);
@@ -318,6 +319,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             set
             {
                 _rightSnapshot = value;
+                FittingUiCustomization.ApplyToSnapshot(_rightSnapshot);
                 _session.SetFittingSnapshots(_leftSnapshot, _rightSnapshot);
                 if (_rightSnapshot != null) _settingsCache.SetSnapshot(DeviceSide.Right, _rightSnapshot);
                 SubscribeSnapshotDirty(_leftSnapshot, _rightSnapshot);
@@ -348,6 +350,95 @@ namespace Ul8ziz.FittingApp.App.ViewModels
 
         /// <summary>Count of parameters in the selected tab (sum of group ParamsCount).</summary>
         public int VisibleParamCount => LeftGroups.Sum(g => g.ParamsCount) + RightGroups.Sum(g => g.ParamsCount);
+
+        /// <summary>True when the Quick Fitting synthetic tab is selected.</summary>
+        // ----- Quick Fitting: side contexts for Left / Right panels (Quick Fitting screen shares this VM) -----
+        private QuickFittingSideContext _qfLeftContext = new();
+        private QuickFittingSideContext _qfRightContext = new();
+        private double _qfNrMin, _qfNrMax = 15, _qfNrStep = 1;
+
+        public QuickFittingSideContext QfLeftContext { get => _qfLeftContext; private set { _qfLeftContext = value; OnPropertyChanged(); } }
+        public QuickFittingSideContext QfRightContext { get => _qfRightContext; private set { _qfRightContext = value; OnPropertyChanged(); } }
+        public double QfNrMin => _qfNrMin;
+        public double QfNrMax => _qfNrMax;
+        public double QfNrStep => _qfNrStep;
+
+        private void ApplyNrMasterDepth(DeviceSettingsSnapshot? snapshot, double depth)
+        {
+            if (snapshot == null) return;
+            foreach (var cat in snapshot.Categories)
+                foreach (var sec in cat.Sections)
+                    foreach (var item in sec.Items)
+                    {
+                        if (item.Name.StartsWith("X_NR_MaxDepth[", StringComparison.OrdinalIgnoreCase))
+                            item.Value = depth;
+                    }
+        }
+
+        private void BuildQuickFittingVMs()
+        {
+            var left = new QuickFittingSideContext
+            {
+                FbcEnable = FindParamVm(LeftSnapshot, "X_FBC_Enable"),
+                FbcGainMgmtEnable = FindParamVm(LeftSnapshot, "X_FBC_GainManagementEnable"),
+                FbcGainMgmtLimit = FindParamVm(LeftSnapshot, "X_FBC_GainManagementLimit"),
+                NrEnable = FindParamVm(LeftSnapshot, "X_NR_Enable"),
+                MmiEnable = FindParamVm(LeftSnapshot, "X_MMI_Enable"),
+                PowerOnDelay = FindParamVm(LeftSnapshot, "X_FWK_PowerOnDelay"),
+            };
+            left.NrMasterDepthChanged += v => ApplyNrMasterDepth(LeftSnapshot, v);
+
+            var right = new QuickFittingSideContext
+            {
+                FbcEnable = FindParamVm(RightSnapshot, "X_FBC_Enable"),
+                FbcGainMgmtEnable = FindParamVm(RightSnapshot, "X_FBC_GainManagementEnable"),
+                FbcGainMgmtLimit = FindParamVm(RightSnapshot, "X_FBC_GainManagementLimit"),
+                NrEnable = FindParamVm(RightSnapshot, "X_NR_Enable"),
+                MmiEnable = FindParamVm(RightSnapshot, "X_MMI_Enable"),
+                PowerOnDelay = FindParamVm(RightSnapshot, "X_FWK_PowerOnDelay"),
+            };
+            right.NrMasterDepthChanged += v => ApplyNrMasterDepth(RightSnapshot, v);
+
+            // NR master slider: read first X_NR_MaxDepth value + range
+            var nrSample = FindParam(LeftSnapshot, "X_NR_MaxDepth[0]") ?? FindParam(RightSnapshot, "X_NR_MaxDepth[0]");
+            if (nrSample != null)
+            {
+                _qfNrMin = double.IsNaN(nrSample.Min) ? 0 : nrSample.Min;
+                _qfNrMax = double.IsNaN(nrSample.Max) ? 15 : nrSample.Max;
+                _qfNrStep = (double.IsNaN(nrSample.Step) || nrSample.Step <= 0) ? 1 : nrSample.Step;
+                left.NrSliderMin = right.NrSliderMin = _qfNrMin;
+                left.NrSliderMax = right.NrSliderMax = _qfNrMax;
+                left.NrSliderStep = right.NrSliderStep = _qfNrStep;
+                OnPropertyChanged(nameof(QfNrMin));
+                OnPropertyChanged(nameof(QfNrMax));
+                OnPropertyChanged(nameof(QfNrStep));
+            }
+            double initDepth = 6;
+            if (nrSample?.Value is double d) initDepth = d;
+            else if (nrSample?.Value != null && double.TryParse(nrSample.Value.ToString(), out var parsed)) initDepth = parsed;
+            left.NrMasterDepth = initDepth;
+            right.NrMasterDepth = initDepth;
+
+            QfLeftContext = left;
+            QfRightContext = right;
+        }
+
+        private static SettingItemViewModel? FindParamVm(DeviceSettingsSnapshot? snapshot, string paramName)
+        {
+            var item = FindParam(snapshot, paramName);
+            return item != null ? new SettingItemViewModel(item) : null;
+        }
+
+        private static SettingItem? FindParam(DeviceSettingsSnapshot? snapshot, string paramName)
+        {
+            if (snapshot == null) return null;
+            foreach (var cat in snapshot.Categories)
+                foreach (var sec in cat.Sections)
+                    foreach (var item in sec.Items)
+                        if (string.Equals(item.Name, paramName, StringComparison.OrdinalIgnoreCase))
+                            return item;
+            return null;
+        }
 
         public ICommand EnableLiveModeCommand { get; }
         public ICommand SaveToDeviceCommand { get; }
@@ -401,6 +492,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 IsLoading = false;
                 BuildItemCaches();
                 RebuildDynamicTabs();
+                BuildQuickFittingVMs();
                 UpdateFilteredItems();
                 OnPropertyChanged(nameof(HasActiveSession));
                 OnPropertyChanged(nameof(ShowLeftCard));
@@ -570,7 +662,11 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             var cat = snapshot.Categories.FirstOrDefault(c => string.Equals(c.Id, tabId, StringComparison.OrdinalIgnoreCase));
             if (cat == null) return list;
             foreach (var sec in cat.Sections)
-                list.Add(new GroupDescriptor { Id = sec.Id, Title = sec.Title, ParamsCount = sec.Items.Count, IsLoaded = false });
+            {
+                var visibleCount = FittingUiCustomization.CountVisibleParams(sec, cat.Title);
+                if (visibleCount > 0)
+                    list.Add(new GroupDescriptor { Id = sec.Id, Title = sec.Title, ParamsCount = visibleCount, IsLoaded = false });
+            }
             return list;
         }
 
@@ -620,8 +716,10 @@ namespace Ul8ziz.FittingApp.App.ViewModels
             var cat = snapshot.Categories.FirstOrDefault(c => string.Equals(c.Id, tabId, StringComparison.OrdinalIgnoreCase));
             var sec = cat?.Sections.FirstOrDefault(s => string.Equals(s.Id, groupId, StringComparison.OrdinalIgnoreCase));
             if (sec == null) return list;
+            var tabTitle = cat?.Title ?? tabId;
             foreach (var item in sec.Items)
             {
+                if (FittingUiCustomization.IsHiddenInTab(item, tabTitle)) continue;
                 if (searchLower.Length > 0 && !MatchesSearch(item, searchLower)) continue;
                 list.Add(new SettingItemViewModel(item));
             }
@@ -906,6 +1004,7 @@ namespace Ul8ziz.FittingApp.App.ViewModels
                 IsLoading = false;
                 BuildItemCaches();
                 RebuildDynamicTabs();
+                BuildQuickFittingVMs();
                 UpdateFilteredItems();
                 OnPropertyChanged(nameof(IsDeviceConfigured));
                 OnPropertyChanged(nameof(SaveDisabledReason));

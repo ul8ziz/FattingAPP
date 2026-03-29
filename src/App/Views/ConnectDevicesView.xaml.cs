@@ -80,7 +80,7 @@ namespace Ul8ziz.FittingApp.App.Views
         // D2XX-first: HI-PRO via FTDI D2XX (no COM/CTK for wired scan)
         private readonly HiProService _hiProService = new HiProService();
 
-        /// <summary>Invoked when connection to device(s) succeeds. Set by shell to auto-navigate to Fitting.</summary>
+        /// <summary>Invoked when connection to device(s) succeeds. MainView sets this to navigate to Quick Fitting.</summary>
         public Action? OnConnectionSucceeded { get; set; }
 
         public ConnectDevicesView()

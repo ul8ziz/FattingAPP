@@ -13,7 +13,13 @@ namespace Ul8ziz.FittingApp.App.Views
             InitializeComponent();
             var vm = new FittingViewModel();
             DataContext = vm;
-            Loaded += (_, _) => vm.OnNavigatedTo();
+        }
+
+        /// <summary>Uses a shared <see cref="FittingViewModel"/> with <see cref="QuickFittingView"/> so both screens stay in sync.</summary>
+        public FittingView(FittingViewModel sharedViewModel)
+        {
+            InitializeComponent();
+            DataContext = sharedViewModel;
         }
 
         private void OnLeftGroupExpanded(object sender, RoutedEventArgs e)

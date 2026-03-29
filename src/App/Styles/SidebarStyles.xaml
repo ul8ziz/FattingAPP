@@ -88,6 +88,15 @@
             </DataTrigger>
         </Style.Triggers>
     </Style>
+    <Style x:Key="SidebarNavButtonQuickFittingStyle" TargetType="Button" BasedOn="{StaticResource SidebarNavButtonStyle}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding CurrentNavKey}" Value="QuickFitting">
+                <Setter Property="Background" Value="{StaticResource SidebarSelectedBgBrush}"/>
+                <Setter Property="BorderThickness" Value="1.5"/>
+                <Setter Property="Foreground" Value="{StaticResource SidebarAccentBlueBrush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
     <Style x:Key="SidebarNavButtonSessionSummaryStyle" TargetType="Button" BasedOn="{StaticResource SidebarNavButtonStyle}">
         <Style.Triggers>
             <DataTrigger Binding="{Binding CurrentNavKey}" Value="SessionSummary">
