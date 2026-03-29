@@ -265,41 +265,91 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         {
             if (string.IsNullOrWhiteSpace(libraryFileName)) return null;
 
-            var productsPath = SdkConfiguration.GetProductsPath();
-            if (!Directory.Exists(productsPath)) return null;
-
             // Strip extension from library name: "E7111V2.library" -> "E7111V2"
             var stem = Path.GetFileNameWithoutExtension(libraryFileName);
+            return FindParamForLibraryStem(stem, searchEmbeddedProductsDirectory: true);
+        }
 
-            // Look for exact match first
-            var paramPath = Path.Combine(productsPath, stem + ".param");
-            if (File.Exists(paramPath))
+        /// <summary>
+        /// Resolves a .param for a library given its full path: checks the library's directory first (external folders),
+        /// then embedded <c>Assets/SoundDesigner/products</c> (same stem rules as <see cref="FindParamForLibrary"/>).
+        /// </summary>
+        public static string? FindParamForLibraryPath(string libraryFullPath)
+        {
+            if (string.IsNullOrWhiteSpace(libraryFullPath) || !File.Exists(libraryFullPath))
+                return null;
+
+            var stem = Path.GetFileNameWithoutExtension(libraryFullPath);
+            var libDir = Path.GetDirectoryName(libraryFullPath);
+            if (!string.IsNullOrEmpty(libDir))
             {
-                Debug.WriteLine($"[ParamFileService] Found matching .param: {paramPath}");
-                return paramPath;
-            }
-
-            // Look for any .param file containing the stem
-            try
-            {
-                var candidates = Directory.GetFiles(productsPath, "*.param")
-                    .Where(f => Path.GetFileNameWithoutExtension(f)
-                        .StartsWith(stem, StringComparison.OrdinalIgnoreCase))
-                    .OrderBy(f => f.Length)
-                    .ToArray();
-
-                if (candidates.Length > 0)
+                var sibling = Path.Combine(libDir, stem + ".param");
+                if (File.Exists(sibling))
                 {
-                    Debug.WriteLine($"[ParamFileService] Found matching .param (prefix): {candidates[0]}");
-                    return candidates[0];
+                    Debug.WriteLine($"[ParamFileService] Found .param next to library: {sibling}");
+                    return sibling;
+                }
+
+                try
+                {
+                    var candidates = Directory.GetFiles(libDir, "*.param")
+                        .Where(f => Path.GetFileNameWithoutExtension(f)
+                            .StartsWith(stem, StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(f => f.Length)
+                        .ToArray();
+                    if (candidates.Length > 0)
+                    {
+                        Debug.WriteLine($"[ParamFileService] Found .param (prefix) next to library: {candidates[0]}");
+                        return candidates[0];
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[ParamFileService] Error searching sibling .param: {ex.Message}");
                 }
             }
-            catch (Exception ex)
+
+            return FindParamForLibraryStem(stem, searchEmbeddedProductsDirectory: true);
+        }
+
+        private static string? FindParamForLibraryStem(string stem, bool searchEmbeddedProductsDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(stem)) return null;
+
+            if (searchEmbeddedProductsDirectory)
             {
-                Debug.WriteLine($"[ParamFileService] Error searching for .param files: {ex.Message}");
+                var productsPath = SdkConfiguration.GetProductsPath();
+                if (Directory.Exists(productsPath))
+                {
+                    var paramPath = Path.Combine(productsPath, stem + ".param");
+                    if (File.Exists(paramPath))
+                    {
+                        Debug.WriteLine($"[ParamFileService] Found matching .param: {paramPath}");
+                        return paramPath;
+                    }
+
+                    try
+                    {
+                        var candidates = Directory.GetFiles(productsPath, "*.param")
+                            .Where(f => Path.GetFileNameWithoutExtension(f)
+                                .StartsWith(stem, StringComparison.OrdinalIgnoreCase))
+                            .OrderBy(f => f.Length)
+                            .ToArray();
+
+                        if (candidates.Length > 0)
+                        {
+                            Debug.WriteLine($"[ParamFileService] Found matching .param (prefix): {candidates[0]}");
+                            return candidates[0];
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[ParamFileService] Error searching for .param files: {ex.Message}");
+                    }
+                }
             }
 
-            Debug.WriteLine($"[ParamFileService] No .param file found for library: {libraryFileName}");
+            Debug.WriteLine($"[ParamFileService] No .param file found for stem: {stem}");
             return null;
         }
 

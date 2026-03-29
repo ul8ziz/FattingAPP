@@ -169,18 +169,30 @@
                     <StackPanel>
                         <TextBlock Text="Setup" Style="{StaticResource Heading3Style}" Margin="0,0,0,16"/>
                     <TextBlock Text="Step 1: Product Library" Style="{StaticResource BodyTextStyle}" Margin="0,0,0,6"/>
-                    <ComboBox ItemsSource="{Binding AvailableLibraries}"
-                              SelectedItem="{Binding SelectedLibrary}"
-                              DisplayMemberPath="FileName"
-                              Height="40" FontSize="14" Padding="8,0"
-                              VerticalContentAlignment="Center"
-                              Margin="0,0,0,20">
-                        <ComboBox.ItemContainerStyle>
-                            <Style TargetType="ComboBoxItem">
-                                <Setter Property="Padding" Value="8,6"/>
-                            </Style>
-                        </ComboBox.ItemContainerStyle>
-                    </ComboBox>
+                    <TextBlock Text="Embedded libraries are listed below. You can add folders that contain Sound Designer .library files; they are loaded by path only (not copied into the app)."
+                               Style="{StaticResource BodyTextStyle}" FontSize="12" Opacity="0.82" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox Grid.Column="0"
+                                  ItemsSource="{Binding AvailableLibraries}"
+                                  SelectedItem="{Binding SelectedLibrary}"
+                                  DisplayMemberPath="DisplayLabel"
+                                  Height="40" FontSize="14" Padding="8,0"
+                                  VerticalContentAlignment="Center"
+                                  Margin="0,0,10,0">
+                            <ComboBox.ItemContainerStyle>
+                                <Style TargetType="ComboBoxItem">
+                                    <Setter Property="Padding" Value="8,6"/>
+                                </Style>
+                            </ComboBox.ItemContainerStyle>
+                        </ComboBox>
+                        <Button Grid.Column="1" Content="Add library folder" Height="40" MinWidth="130"
+                                Padding="12,0" FontSize="13" VerticalAlignment="Center"
+                                Click="AddLibraryFolder_Click"/>
+                    </Grid>
 
                     <TextBlock Text="Step 2: Programmer" Style="{StaticResource BodyTextStyle}" Margin="0,0,0,8"/>
                     <ItemsControl ItemsSource="{Binding Programmers}" Margin="0,0,0,0">

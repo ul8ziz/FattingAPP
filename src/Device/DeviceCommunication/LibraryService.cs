@@ -43,20 +43,109 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         // =========================================================================
 
         /// <summary>
-        /// Lists all available *.library files from the embedded assets (products folder).
-        /// Returns (fileName, fullPath) pairs sorted by name.
+        /// Lists embedded *.library files plus any libraries discovered under user-added external folders
+        /// (see <see cref="ProductLibraryRegistry"/>). Merged list is sorted: embedded first, then external, by display label.
         /// </summary>
         public static List<LibraryInfo> EnumerateLibraries()
         {
-            var files = SdkConfiguration.EnumerateLibraryFiles();
-            return files
-                .Select(f => new LibraryInfo
+            var embeddedFiles = SdkConfiguration.EnumerateLibraryFiles();
+            var embedded = embeddedFiles
+                .Select(f =>
                 {
-                    FileName = Path.GetFileNameWithoutExtension(f),
-                    FullPath = f
+                    var stem = Path.GetFileNameWithoutExtension(f);
+                    return new LibraryInfo
+                    {
+                        Id = "embedded:" + stem,
+                        SourceKind = LibrarySourceKind.Embedded,
+                        SourceRootFolder = null,
+                        FileName = stem,
+                        FullPath = f,
+                        DisplayLabel = stem
+                    };
                 })
-                .OrderBy(l => l.FileName)
                 .ToList();
+
+            var external = ProductLibraryRegistry.Instance.EnumerateExternalLibraryInfos();
+            return MergeAndLabelLibraries(embedded, external);
+        }
+
+        /// <summary>
+        /// Assigns <see cref="LibraryInfo.DisplayLabel"/> for embedded vs external and duplicate stems; stable sort.
+        /// </summary>
+        private static List<LibraryInfo> MergeAndLabelLibraries(List<LibraryInfo> embedded, List<LibraryInfo> external)
+        {
+            foreach (var e in embedded)
+            {
+                if (string.IsNullOrEmpty(e.DisplayLabel))
+                    e.DisplayLabel = e.FileName;
+            }
+
+            var all = new List<LibraryInfo>(embedded.Count + external.Count);
+            all.AddRange(embedded);
+            all.AddRange(external);
+
+            var groups = all.GroupBy(l => l.FileName, StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var g in groups)
+            {
+                var items = g.ToList();
+                if (items.Count == 1)
+                {
+                    var x = items[0];
+                    if (x.SourceKind == LibrarySourceKind.ExternalFolder)
+                        x.DisplayLabel = x.FileName + " (External)";
+                    else
+                        x.DisplayLabel = x.FileName;
+                    continue;
+                }
+
+                var emb = items.Where(i => i.SourceKind == LibrarySourceKind.Embedded).ToList();
+                var ext = items.Where(i => i.SourceKind == LibrarySourceKind.ExternalFolder).ToList();
+
+                foreach (var e in emb)
+                    e.DisplayLabel = e.FileName;
+
+                if (ext.Count == 0)
+                    continue;
+
+                if (emb.Count >= 1 && ext.Count == 1)
+                {
+                    ext[0].DisplayLabel = ext[0].FileName + " (External)";
+                    continue;
+                }
+
+                foreach (var x in ext)
+                {
+                    var hint = ShortDisambiguationHint(x);
+                    x.DisplayLabel = x.FileName + " (External, " + hint + ")";
+                }
+            }
+
+            return all
+                .OrderBy(l => l.SourceKind)
+                .ThenBy(l => l.DisplayLabel, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static string ShortDisambiguationHint(LibraryInfo lib)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(lib.FullPath);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    var leaf = Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                    if (!string.IsNullOrEmpty(leaf))
+                        return leaf;
+                }
+                if (!string.IsNullOrEmpty(lib.SourceRootFolder))
+                    return Path.GetFileName(lib.SourceRootFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) ?? "folder";
+            }
+            catch
+            {
+                /* ignore */
+            }
+
+            return "folder";
         }
 
         // =========================================================================
@@ -93,6 +182,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                 Debug.WriteLine($"[LibraryService] SDK Version: {_productManager.Version}");
                 Debug.WriteLine($"[LibraryService] Loading library: {libraryPath}");
 
+                // sounddesigner_programmers_guide.pdf section 6.1 / sounddesigner_api_reference.pdf section 2.1.3 — LoadLibraryFromFile(path to .library file)
                 _loadedLibrary = _productManager.LoadLibraryFromFile(libraryPath);
                 if (_loadedLibrary == null)
                     throw new InvalidOperationException($"Failed to load library: {libraryPath}");
@@ -638,11 +728,25 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
         }
     }
 
-    /// <summary>Describes an available *.library file.</summary>
+    /// <summary>Describes an available *.library file (embedded or from an external folder).</summary>
     public class LibraryInfo
     {
+        /// <summary>Stable key for selection restore (e.g. embedded:STEM or ext:fullPath).</summary>
+        public string Id { get; set; } = "";
+
+        public LibrarySourceKind SourceKind { get; set; } = LibrarySourceKind.Embedded;
+
+        /// <summary>User-added root folder when <see cref="SourceKind"/> is <see cref="LibrarySourceKind.ExternalFolder"/>.</summary>
+        public string? SourceRootFolder { get; set; }
+
+        /// <summary>Library file name without extension; used for firmware matching.</summary>
         public string FileName { get; set; } = "";
+
         public string FullPath { get; set; } = "";
-        public override string ToString() => FileName;
+
+        /// <summary>User-visible label in dropdowns (may include External suffix).</summary>
+        public string DisplayLabel { get; set; } = "";
+
+        public override string ToString() => !string.IsNullOrEmpty(DisplayLabel) ? DisplayLabel : FileName;
     }
 }

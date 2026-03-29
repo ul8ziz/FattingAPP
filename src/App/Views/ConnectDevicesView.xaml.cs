@@ -11,6 +11,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using Ookii.Dialogs.Wpf;
 using Ul8ziz.FittingApp.Device.DeviceCommunication;
 using Ul8ziz.FittingApp.Device.DeviceCommunication.Models;
 using Ul8ziz.FittingApp.App.Helpers;
@@ -124,12 +125,15 @@ namespace Ul8ziz.FittingApp.App.Views
             try
             {
                 System.Diagnostics.Debug.WriteLine("=== Initializing SDK services (shared SdkManager) ===");
+                var persistedLibs = ExternalLibraryFoldersSettings.Load();
+                persistedLibs.ApplyToRegistry();
+
                 var libraryPath = SdkConfiguration.GetLibraryPath();
                 var configPath = SdkConfiguration.GetConfigPath();
                 System.Diagnostics.Debug.WriteLine($"Library Path: {libraryPath}");
                 System.Diagnostics.Debug.WriteLine($"Config Path: {configPath}");
 
-                // Enumerate libraries (no SDK required)
+                // Enumerate libraries (no SDK required; includes external folders from registry)
                 var availableLibraries = LibraryService.EnumerateLibraries();
                 await Application.Current.Dispatcher.InvokeAsync(() =>
                 {
@@ -173,9 +177,8 @@ namespace Ul8ziz.FittingApp.App.Views
                 await FittingSessionManager.Instance.CreateOfflineSessionAsync(libraryPath);
                 System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Default library loaded for offline browsing: {System.IO.Path.GetFileName(libraryPath)}");
 
-                // Auto-load matching .param file (e.g., E7111V2.param for E7111V2.library)
-                var libraryFileName = System.IO.Path.GetFileName(libraryPath);
-                var paramPath = ParamFileService.FindParamForLibrary(libraryFileName);
+                // Auto-load matching .param: sibling of .library first, then embedded products (ParamFileService)
+                var paramPath = ParamFileService.FindParamForLibraryPath(libraryPath);
                 if (paramPath != null)
                 {
                     try
@@ -191,7 +194,7 @@ namespace Ul8ziz.FittingApp.App.Views
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine($"[ConnectDevices] No matching .param file found for {libraryFileName}");
+                    System.Diagnostics.Debug.WriteLine($"[ConnectDevices] No matching .param file found for {System.IO.Path.GetFileName(libraryPath)}");
                 }
             }
             catch (Exception ex)
@@ -199,6 +202,89 @@ namespace Ul8ziz.FittingApp.App.Views
                 DiagnosticService.Instance.RecordException("LoadLibrary", DiagnosticCategory.Persistence, ex, "ConnectDevices", null, null);
                 System.Diagnostics.Debug.WriteLine($"[ConnectDevices] Failed to load default library: {ex.Message}");
             }
+        }
+
+        private async void AddLibraryFolder_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dlg = new VistaFolderBrowserDialog
+                {
+                    Description = "Select a folder that contains Sound Designer .library files",
+                    UseDescriptionForTitle = true,
+                    ShowNewFolderButton = false
+                };
+                var owner = Window.GetWindow(this);
+                if (dlg.ShowDialog(owner) != true)
+                    return;
+                var path = dlg.SelectedPath;
+                if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+                    return;
+
+                int n;
+                try
+                {
+                    n = ProductLibraryRegistry.CountLibraryFilesInTree(path);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        "Could not read the selected folder: " + ex.Message,
+                        "Product Library",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (n == 0)
+                {
+                    MessageBox.Show(
+                        "No .library files were found in the selected folder or its subfolders.",
+                        "Product Library",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    return;
+                }
+
+                var settings = ExternalLibraryFoldersSettings.Load();
+                if (!settings.ExternalLibraryFolders.Contains(path, StringComparer.OrdinalIgnoreCase))
+                {
+                    settings.ExternalLibraryFolders.Add(path);
+                    settings.Save();
+                }
+                settings.ApplyToRegistry();
+
+                var previousId = SelectedLibrary?.Id;
+                await RefreshProductLibraryListAsync(previousId).ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticService.Instance.RecordException("AddLibraryFolder", DiagnosticCategory.General, ex, "ConnectDevices", null, null);
+                MessageBox.Show(
+                    "Could not add library folder: " + ex.Message,
+                    "Product Library",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
+
+        /// <summary>Rebuilds the merged library list after registry/settings change.</summary>
+        private async Task RefreshProductLibraryListAsync(string? preferredSelectionId)
+        {
+            var libs = LibraryService.EnumerateLibraries();
+            await Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                AvailableLibraries.Clear();
+                foreach (var lib in libs)
+                    AvailableLibraries.Add(lib);
+                LibraryInfo? match = null;
+                if (!string.IsNullOrEmpty(preferredSelectionId))
+                    match = AvailableLibraries.FirstOrDefault(l => string.Equals(l.Id, preferredSelectionId, StringComparison.Ordinal));
+                if (match != null)
+                    SelectedLibrary = match;
+                else if (AvailableLibraries.Count > 0)
+                    SelectedLibrary = AvailableLibraries[0];
+            });
         }
 
         /// <summary>Status text showing loaded .param file name (for UI display).</summary>
@@ -625,7 +711,7 @@ namespace Ul8ziz.FittingApp.App.Views
                 FoundProgrammersMessage = $"Error: {ex.Message}";
                 
                 MessageBox.Show(
-                    $"Failed to scan for programmers:\n\n{ex.Message}\n\nPlease check:\n- Library file exists: {SdkConfiguration.GetLibraryPath()}\n- Config file exists: {SdkConfiguration.GetConfigPath()}\n- App directory: {AppDomain.CurrentDomain.BaseDirectory}\n- Programmers are connected\n- Drivers are installed",
+                    $"Failed to scan for programmers:\n\n{ex.Message}\n\nPlease check:\n- Default library exists: {SdkConfiguration.GetLibraryPath()}\n- Config file exists: {SdkConfiguration.GetConfigPath()}\n- If using external libraries, folders still exist on disk\n- App directory: {AppDomain.CurrentDomain.BaseDirectory}\n- Programmers are connected\n- Drivers are installed",
                     "Scan Error",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
@@ -998,7 +1084,7 @@ namespace Ul8ziz.FittingApp.App.Views
                     System.Diagnostics.Debug.WriteLine($"[ConnectDevices] ReloadForFirmware FAILED: {ex.Message}");
                     throw new InvalidOperationException(
                         $"No library found for firmware '{detectedFirmware}'.\n\n" +
-                        "Ensure the matching .library file is in Assets\\SoundDesigner\\products\\.", ex);
+                        "Ensure the matching .library file is under Assets\\SoundDesigner\\products\\ or in an added external library folder (Step 1).", ex);
                 }
 
                 var result = new ConnectionResult();

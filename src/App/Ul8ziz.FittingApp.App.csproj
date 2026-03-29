@@ -100,6 +100,7 @@
     <Reference Include="FTD2XX_NET">
       <HintPath>NativeDeps\HI-PRO\FTD2XX_NET.dll</HintPath>
     </Reference>
+    <PackageReference Include="Ookii.Dialogs.Wpf" Version="5.0.1" />
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.2" />
   </ItemGroup>

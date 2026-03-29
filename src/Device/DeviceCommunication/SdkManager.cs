@@ -174,6 +174,7 @@ namespace Ul8ziz.FittingApp.Device.DeviceCommunication
                     throw new InvalidOperationException("Failed to get ProductManager instance");
             }
 
+            // sounddesigner_api_reference.pdf section 2.1.3 — LoadLibraryFromFile(path); path may be embedded or external .library file
             _library = _productManager.LoadLibraryFromFile(match.FullPath);
             if (_library == null)
                 throw new InvalidOperationException($"Failed to load library: {match.FullPath}");
